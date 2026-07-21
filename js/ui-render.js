@@ -40,18 +40,6 @@ export function render(stage) {
   if (roomView.phase === 'turns') { renderTurns(stage); return; }
   if (roomView.phase === 'reveal') { renderReveal(stage); return; }
   if (roomView.phase === 'final') { renderFinal(stage); return; }
-  
-  // チャットの表示制御
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) {
-    // タイトル画面・作成画面・参加画面・接続中は非表示
-    if (ui.screen === 'title' || ui.screen === 'create' || ui.screen === 'join' || ui.screen === 'connecting') {
-      chatPanel.style.display = 'none';
-    } else {
-      // ロビー・ゲーム中は表示
-      chatPanel.style.display = 'block';
-    }
-  }
 }
 
 function renderDisconnected(stage) {
@@ -108,7 +96,6 @@ function renderTitle(stage) {
   document.getElementById('toJoin').onclick = () => { ui.screen = 'join'; render(stage); };
   document.getElementById('titleRulesBtn').onclick = () => window.openRulesModal();
   
-  // タイトル画面ではチャット非表示
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -119,7 +106,6 @@ function renderConnecting(stage) {
   wrap.innerHTML = `<div class="seal">${t('connectingSeal')}</div><p class="title-sub">${t('connecting')}<span class="wait-dots"></span></p>`;
   stage.appendChild(wrap);
   
-  // 接続中はチャット非表示
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -170,7 +156,6 @@ function renderCreate(stage) {
   document.getElementById('back1').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('createRulesBtn').onclick = () => window.openRulesModal();
   
-  // 作成画面ではチャット非表示
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -201,7 +186,6 @@ function renderJoin(stage) {
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
   
-  // 参加画面ではチャット非表示
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -240,7 +224,6 @@ function renderLobby(stage) {
   document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
   
-  // ロビーではチャット表示
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'block';
 }
@@ -262,7 +245,9 @@ function buildScoreboard(highlightIdx) {
 
 function renderAlibi(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
-  if (alibiLocal.round !== roomView.round) { alibiLocal = { round: roomView.round, shown: false, values: null }; }
+  if (alibiLocal.round !== roomView.round) { 
+    alibiLocal = { round: roomView.round, shown: false, values: null }; 
+  }
   const n = roomView.players.length;
   const neighbor = (myPlayerIndex + 1) % n;
   const acked = roomView.alibiAcked[myPlayerIndex];
@@ -273,12 +258,38 @@ function renderAlibi(stage) {
 
   const card = document.createElement('div');
   card.className = 'card';
+  
   if (acked) {
     card.innerHTML = `<h2>${t('alibiComplete')}</h2><p>${t('waitingOthers')}</p>`;
   } else if (!alibiLocal.shown) {
     card.innerHTML = `<h2>${t('alibi')}</h2><p>${t('alibiDesc')} <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiDesc2')}</p>`;
   } else {
-    card.innerHTML = `<h2>${t('alibi')}</h2><p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>`;
+    const myValue = alibiLocal.values.mine;
+    const neighborValue = alibiLocal.values.neighbor;
+    const myFlipClass = isFlipValue(myValue) ? ' is-flip' : '';
+    const neighborFlipClass = isFlipValue(neighborValue) ? ' is-flip' : '';
+    
+    card.innerHTML = `
+      <h2>${t('alibi')}</h2>
+      <p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>
+      <div style="display:flex; gap:20px; justify-content:center; margin:20px 0;">
+        <div style="text-align:center;">
+          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${t('you')}</div>
+          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <div class="head${myFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(myValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(myValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(myValue)}</div>
+            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
+          </div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${escapeHtml(roomView.players[neighbor].name)}</div>
+          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <div class="head${neighborFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(neighborValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(neighborValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(neighborValue)}</div>
+            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:12px; color:var(--ink-soft);">${t('waitingAlibi')}</p>
+    `;
   }
   wrap.appendChild(card);
 
@@ -340,6 +351,24 @@ function renderTurns(stage) {
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
   wrap.appendChild(buildScoreboard(curIdx));
+  
+  if (alibiLocal.shown && alibiLocal.values) {
+    const myAlibiPanel = document.createElement('div');
+    myAlibiPanel.className = 'my-cards-panel';
+    myAlibiPanel.innerHTML = `<h3>${t('confirmedPeople')}</h3><div class="cards-display">
+      <div class="mini-card">
+        <div class="mini-head${isFlipValue(alibiLocal.values.mine) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.mine)}</div>
+        <div class="mini-body">${t('person')}</div>
+        <div class="mini-label">${t('you')}</div>
+      </div>
+      <div class="mini-card">
+        <div class="mini-head${isFlipValue(alibiLocal.values.neighbor) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.neighbor)}</div>
+        <div class="mini-body">${t('person')}</div>
+        <div class="mini-label">${escapeHtml(roomView.players[(myPlayerIndex + 1) % roomView.players.length].name)}</div>
+      </div>
+    </div>`;
+    wrap.appendChild(myAlibiPanel);
+  }
 
   const p = document.createElement('p');
   p.className = 'center';
@@ -359,24 +388,68 @@ function renderTurns(stage) {
   p.appendChild(leaveBtn);
   wrap.appendChild(p);
 
-  // 簡易的な容疑者カード表示
-  const suspectsRow = document.createElement('div');
-  suspectsRow.className = 'suspects-row';
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'grove-table';
+  tableWrap.innerHTML = '<div class="table-surface"></div>';
+  
+  const victimSpot = document.createElement('div');
+  victimSpot.className = 'victim-spot';
+  victimSpot.innerHTML = `
+    <div class="victim-tile">
+      <div class="v-kanji">${t('victimKanji')}</div>
+      <div style="font-size:8px;letter-spacing:.1em;">${t('hidden')}</div>
+    </div>
+  `;
+  tableWrap.appendChild(victimSpot);
+  
   for (let i = 0; i < 3; i++) {
+    const spot = document.createElement('div');
+    spot.className = 'suspect-spot';
+    spot.setAttribute('data-idx', i);
+    
+    const peekedValue = tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
+    const isPeeked = peekedValue !== null;
+    const isChosen = tl.guessChoice === i;
+    const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
+    
     const card = document.createElement('div');
-    card.className = 'suspect-card' + (tl.guessChoice === i ? ' chosen' : '');
+    card.className = 'grove-card' + 
+      (isPeeked ? ' peeked' : '') + 
+      (isChosen ? ' chosen' : '') + 
+      (isSelectedForPeek ? ' selected-for-peek' : '');
+    
+    const headContent = isPeeked ? formatFlipValue(peekedValue) : '';
+    const bodyContent = isPeeked ? t('confirmed') : '？';
+    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
+    
     card.innerHTML = `
-      <div class="s-label">${labels[i]}</div>
-      <div class="head">${tl.peekedValues && tl.peekedValues[i] !== undefined ? formatFlipValue(tl.peekedValues[i]) : ''}</div>
-      <div class="body">${tl.peekedValues && tl.peekedValues[i] !== undefined ? t('confirmed') : '？'}</div>
+      <div class="g-label">${labels[i]}</div>
+      <div class="g-head${headClass}">${headContent}</div>
+      <div class="g-body">${bodyContent}</div>
     `;
-    if (isMyTurn && tl.evidenceSeen) {
+    
+    if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
       card.classList.add('clickable');
-      card.onclick = () => { tl.guessChoice = i; render(stage); };
+      card.onclick = () => {
+        if (tl.chosenTwo.has(i)) {
+          tl.chosenTwo.delete(i);
+        } else if (tl.chosenTwo.size < 2) {
+          tl.chosenTwo.add(i);
+        }
+        render(stage);
+      };
+    } else if (isMyTurn && tl.evidenceSeen) {
+      card.classList.add('clickable');
+      card.onclick = () => {
+        tl.guessChoice = i;
+        render(stage);
+      };
     }
-    suspectsRow.appendChild(card);
+    
+    spot.appendChild(card);
+    tableWrap.appendChild(spot);
   }
-  wrap.appendChild(suspectsRow);
+  wrap.appendChild(tableWrap);
 
   if (!isMyTurn) {
     const wp = document.createElement('div');
@@ -392,18 +465,81 @@ function renderTurns(stage) {
   actionArea.style.marginTop = '18px';
 
   if (!tl.evidenceSeen) {
-    actionArea.innerHTML = `<button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>`;
+    if (roomView.currentPos === 0) {
+      const remaining = 2 - (tl.chosenTwo ? tl.chosenTwo.size : 0);
+      actionArea.innerHTML = `
+        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
+          ${t('firstDetective')} ${t('tapSuspect')}${t('checkNumbers')}<br>
+          <span style="color:var(--blood); font-weight:600;">${remaining} ${t('remainingSelect')}</span>
+        </p>
+        ${(tl.chosenTwo && tl.chosenTwo.size === 2) ? `<button class="btn primary" id="confirmPeek">${t('confirm')}</button>` : ''}
+      `;
+      wrap.appendChild(actionArea);
+      stage.appendChild(wrap);
+      
+      const cp = document.getElementById('confirmPeek');
+      if (cp && tl.chosenTwo && tl.chosenTwo.size === 2) {
+        cp.onclick = async () => {
+          const { result, error } = await Net.peek([...tl.chosenTwo]);
+          if (error) return;
+          tl.peekedValues = result.values;
+          tl.evidenceSeen = true;
+          render(stage);
+        };
+      }
+      return;
+    } else {
+      actionArea.innerHTML = `
+        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
+          ${t('exceptPrevious')} ${t('touchRemaining')}
+        </p>
+        <button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>
+      `;
+      wrap.appendChild(actionArea);
+      stage.appendChild(wrap);
+      const ve = document.getElementById('viewEvidence');
+      if (ve) {
+        ve.onclick = async () => {
+          const { result, error } = await Net.peek([]);
+          if (error) return;
+          tl.peekedValues = result.values;
+          tl.evidenceSeen = true;
+          render(stage);
+        };
+      }
+      return;
+    }
+  }
+
+  if (roomView.currentPos === 0 && roomView.expansionEnabled && !tl.swapDecided) {
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${t('expansionDesc')}</p>
+      <div class="row" style="justify-content:center;" id="swapButtons"></div>`;
     wrap.appendChild(actionArea);
     stage.appendChild(wrap);
-    const ve = document.getElementById('viewEvidence');
-    if (ve) {
-      ve.onclick = async () => {
-        const { result, error } = await Net.peek([]);
-        if (error) return;
-        tl.peekedValues = result.values;
-        tl.evidenceSeen = true;
-        render(stage);
+    const sb = document.getElementById('swapButtons');
+    if (sb) {
+      for (let i = 0; i < 3; i++) {
+        const b = document.createElement('button');
+        b.className = 'btn small';
+        b.textContent = `${labels[i]} ${t('swap')}`;
+        b.onclick = async () => { 
+          const { error } = await Net.swap(i); 
+          if (error) return; 
+          tl.swapDecided = true; 
+          render(stage); 
+        };
+        sb.appendChild(b);
+      }
+      const skip = document.createElement('button');
+      skip.className = 'btn small'; 
+      skip.textContent = t('noSwap');
+      skip.onclick = async () => { 
+        const { error } = await Net.swap('skip'); 
+        if (error) return; 
+        tl.swapDecided = true; 
+        render(stage); 
       };
+      sb.appendChild(skip);
     }
     return;
   }
