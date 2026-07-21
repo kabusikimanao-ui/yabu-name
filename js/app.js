@@ -207,7 +207,74 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = t('tabCloseWarning');
   }
 });
+window.hostAdvanceAfterReveal = function() {
+  const { room } = getNetworkState();
+  const anyOver = room.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
+  if (anyOver) { room.phase = 'final'; }
+  else {
+    room.round += 1;
+    room.startIdx = (room.startIdx + 1) % room.players.length;
+    buildRoundState(room);
+  }
+  hostBroadcast();
+};
 
+window.hostPlayAgain = function() {
+  const { room } = getNetworkState();
+  room.round = 1; room.startIdx = 0;
+  room.players.forEach(p => { p.faceUp = 5; p.faceDown = 0; });
+  buildRoundState(room);
+  hostBroadcast();
+};
+
+window.restoreGame = function(savedRoom) {
+  const code = savedRoom.code;
+  let settled = false;
+  const p = new Promise(resolve => {
+    try {
+      const peer = new PeerCtor('yabu-' + code);
+      peer.on('open', () => { if (settled) return; settled = true; resolve(peer); });
+      peer.on('error', (err) => { if (settled) return; settled = true; try { peer.destroy(); } catch (e) {} resolve(null); });
+    } catch (e) { resolve(null); }
+  });
+  p.then(peer => {
+    if (!peer) { alert(t('roomInUse')); return; }
+    setNetworkState({ isHost: true, peer, room: savedRoom, myPlayerIndex: 0, roomView: redact(savedRoom, new Map()) });
+    peer.on('connection', conn => {
+      conn.on('data', msg => hostHandleRequest(conn, msg));
+      conn.on('close', () => { hostBroadcast(); });
+    });
+    const { ui } = getUIState();
+    ui.screen = null;
+    render(stage);
+  });
+};
+
+window.openRulesModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${getCurrentLang() === 'ja' ? '遊び方 — 藪の中' : 'How to Play — In a Grove'}</h3>
+      <h4>${getCurrentLang() === 'ja' ? '概要' : 'Overview'}</h4>
+      <p>${getCurrentLang() === 'ja' ? '竹林で一体の骸が見つかった。現場には「被害者」1枚と「容疑者」3枚の数字タイルが伏せられている。プレイヤーは2〜5人。全員が少しずつ違う手がかりを持ち寄り、証言を重ねながら「本当の犯人」を推理する。' : 'A corpse was found in a bamboo grove. At the scene are 1 "Victim" tile and 3 "Suspect" tiles placed face down. 2-5 players work together to deduce the "true culprit".'}</p>
+      <h4>${getCurrentLang() === 'ja' ? '① アリバイ確認フェーズ' : '① Alibi Check Phase'}</h4>
+      <p>${getCurrentLang() === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
+      <h4>${getCurrentLang() === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
+      <ul>
+        <li><b>${getCurrentLang() === 'ja' ? '第一発見者' : 'First Detective'}</b>：${getCurrentLang() === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
+        <li><b>${getCurrentLang() === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${getCurrentLang() === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
+      </ul>
+      <h4>${getCurrentLang() === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <ul>
+        <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
+        <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
+      </ul>
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('closeRules').onclick = () => { document.body.removeChild(overlay); };
+};
 // 初期化
 initChat();
 render(stage);
