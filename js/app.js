@@ -132,81 +132,6 @@ window.hostStartGame = function() {
   hostBroadcast();
 };
 
-// 言語切り替え
-document.getElementById('langBtn').onclick = function() {
-  const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
-  setCurrentLang(newLang);
-  this.textContent = newLang === 'ja' ? 'English' : '日本語';
-  const { labels } = getUIState();
-  setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
-  render(stage);
-};
-
-// チャット初期化
-function initChat() {
-  const input = document.getElementById('chatInput');
-  const send = document.getElementById('chatSend');
-  const header = document.getElementById('chatHeader');
-
-  if (header) {
-    header.onclick = function() {
-      const { chatCollapsed } = getUIState();
-      const newCollapsed = !chatCollapsed;
-      setUIState({ chatCollapsed: newCollapsed });
-      const panel = document.getElementById('chatPanel');
-      if (panel) {
-        if (newCollapsed) panel.classList.add('collapsed');
-        else panel.classList.remove('collapsed');
-      }
-    };
-  }
-
-  if (!input || !send) return;
-  send.onclick = () => {
-    const text = input.value.trim();
-    if (!text) return;
-    Net.chat(text);
-    input.value = '';
-  };
-  input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') send.click();
-  });
-}
-
-// チャットメッセージ受信時の処理
-window.onChatMessage = function(chatMsg) {
-  const { chatMessages } = getUIState();
-  chatMessages.push(chatMsg);
-  if (chatMessages.length > 50) chatMessages.shift();
-  setUIState({ chatMessages });
-  
-  const messages = document.getElementById('chatMessages');
-  if (messages) {
-    const lang = getCurrentLang();
-    messages.innerHTML = chatMessages.map(m => {
-      const time = new Date(m.ts).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' });
-      return `<div class="chat-message"><span class="chat-time">[${escapeHtml(time)}]</span><span class="chat-name">${escapeHtml(m.name)}:</span> <span class="chat-text">${escapeHtml(m.text)}</span></div>`;
-    }).join('');
-    messages.scrollTop = messages.scrollHeight;
-  }
-  
-  const panel = document.getElementById('chatPanel');
-  if (panel) panel.style.display = 'block';
-};
-
-// ゲーム状態変更時の処理
-window.onGameStateChanged = function(view) {
-  render(stage);
-};
-
-// ホストのbeforeunload警告
-window.addEventListener('beforeunload', (e) => {
-  const { isHost, room } = getNetworkState();
-  if (isHost && room && room.phase !== 'final' && room.phase !== 'lobby') {
-    e.preventDefault();
-    e.returnValue = t('tabCloseWarning');
-  }
-});
 window.hostAdvanceAfterReveal = function() {
   const { room } = getNetworkState();
   const anyOver = room.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
@@ -260,12 +185,12 @@ window.openRulesModal = function() {
       <p>${getCurrentLang() === 'ja' ? '竹林で一体の骸が見つかった。現場には「被害者」1枚と「容疑者」3枚の数字タイルが伏せられている。プレイヤーは2〜5人。全員が少しずつ違う手がかりを持ち寄り、証言を重ねながら「本当の犯人」を推理する。' : 'A corpse was found in a bamboo grove. At the scene are 1 "Victim" tile and 3 "Suspect" tiles placed face down. 2-5 players work together to deduce the "true culprit".'}</p>
       <h4>${getCurrentLang() === 'ja' ? '① アリバイ確認フェーズ' : '① Alibi Check Phase'}</h4>
       <p>${getCurrentLang() === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
-      <h4>${getCurrentLang() === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
+      <h4>${getCurrentLang() === 'ja' ? '② 証言フェーズ' : ' Testimony Phase'}</h4>
       <ul>
         <li><b>${getCurrentLang() === 'ja' ? '第一発見者' : 'First Detective'}</b>：${getCurrentLang() === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
         <li><b>${getCurrentLang() === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${getCurrentLang() === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
       </ul>
-      <h4>${getCurrentLang() === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <h4>${getCurrentLang() === 'ja' ? ' 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
       <ul>
         <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
         <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
@@ -275,6 +200,93 @@ window.openRulesModal = function() {
   document.body.appendChild(overlay);
   document.getElementById('closeRules').onclick = () => { document.body.removeChild(overlay); };
 };
+
+// 言語切り替え
+document.getElementById('langBtn').onclick = function() {
+  const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
+  setCurrentLang(newLang);
+  this.textContent = newLang === 'ja' ? 'English' : '日本語';
+  const { labels } = getUIState();
+  setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
+  render(stage);
+};
+
+// チャット初期化
+function initChat() {
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('chatSend');
+  const header = document.getElementById('chatHeader');
+  const panel = document.getElementById('chatPanel');
+
+  // 初期状態では非表示
+  if (panel) panel.style.display = 'none';
+
+  if (header) {
+    header.onclick = function() {
+      const { chatCollapsed } = getUIState();
+      const newCollapsed = !chatCollapsed;
+      setUIState({ chatCollapsed: newCollapsed });
+      if (panel) {
+        if (newCollapsed) panel.classList.add('collapsed');
+        else panel.classList.remove('collapsed');
+      }
+    };
+  }
+
+  if (!input || !send) return;
+  send.onclick = () => {
+    const text = input.value.trim();
+    if (!text) return;
+    Net.chat(text);
+    input.value = '';
+  };
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') send.click();
+  });
+}
+
+// チャットメッセージ受信時の処理
+window.onChatMessage = function(chatMsg) {
+  const { chatMessages } = getUIState();
+  chatMessages.push(chatMsg);
+  if (chatMessages.length > 50) chatMessages.shift();
+  setUIState({ chatMessages });
+  
+  const messages = document.getElementById('chatMessages');
+  if (messages) {
+    const lang = getCurrentLang();
+    messages.innerHTML = chatMessages.map(m => {
+      const time = new Date(m.ts).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+      return `<div class="chat-message"><span class="chat-time">[${escapeHtml(time)}]</span><span class="chat-name">${escapeHtml(m.name)}:</span> <span class="chat-text">${escapeHtml(m.text)}</span></div>`;
+    }).join('');
+    messages.scrollTop = messages.scrollHeight;
+  }
+  
+  const panel = document.getElementById('chatPanel');
+  if (panel) panel.style.display = 'block';
+};
+
+// ゲーム状態変更時の処理
+window.onGameStateChanged = function(view) {
+  render(stage);
+  
+  // チャットの表示制御
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel && view) {
+    // ロビー・ゲーム中はチャットを表示
+    chatPanel.style.display = 'block';
+  }
+};
+
+// ホストのbeforeunload警告
+window.addEventListener('beforeunload', (e) => {
+  const { isHost, room } = getNetworkState();
+  if (isHost && room && room.phase !== 'final' && room.phase !== 'lobby') {
+    e.preventDefault();
+    e.returnValue = t('tabCloseWarning');
+  }
+});
+
 // 初期化
 initChat();
 render(stage);
