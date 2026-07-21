@@ -207,7 +207,6 @@ function renderJoin(stage) {
         copyBtn.textContent = 'コピーしました！';
         setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
       }).catch(() => {
-        // クリップボードAPIが失敗した場合のフォールバック
         const textArea = document.createElement('textarea');
         textArea.value = url;
         document.body.appendChild(textArea);
@@ -473,6 +472,7 @@ function renderTurns(stage) {
   `;
   tableWrap.appendChild(victimSpot);
   
+  // 容疑者3人（3Dめくりアニメーション版）
   for (let i = 0; i < 3; i++) {
     const spot = document.createElement('div');
     spot.className = 'suspect-spot';
@@ -483,41 +483,64 @@ function renderTurns(stage) {
     const isChosen = tl.guessChoice === i;
     const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
     
-    const card = document.createElement('div');
-    card.className = 'grove-card' + 
-      (isPeeked ? ' peeked' : '') + 
-      (isChosen ? ' chosen' : '') + 
-      (isSelectedForPeek ? ' selected-for-peek' : '');
+    // 3Dカードめくり用コンテナ
+    const flipContainer = document.createElement('div');
+    flipContainer.className = 'card-flip-container';
     
-    const headContent = isPeeked ? formatFlipValue(peekedValue) : '';
-    const bodyContent = isPeeked ? t('confirmed') : '？';
-    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
+    const flipper = document.createElement('div');
+    flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
     
-    card.innerHTML = `
+    // 表面（伏せ状態）
+    const front = document.createElement('div');
+    front.className = 'card-front';
+    front.innerHTML = `
       <div class="g-label">${labels[i]}</div>
-      <div class="g-head${headClass}">${headContent}</div>
-      <div class="g-body">${bodyContent}</div>
+      <div class="g-head">？</div>
+      <div class="g-body">伏せ</div>
     `;
     
+    // 裏面（めくり状態）
+    const back = document.createElement('div');
+    back.className = 'card-back';
+    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
+    back.innerHTML = `
+      <div class="g-label">${labels[i]}</div>
+      <div class="g-head${headClass}">${isPeeked ? formatFlipValue(peekedValue) : ''}</div>
+      <div class="g-body">${isPeeked ? t('confirmed') : '？'}</div>
+    `;
+    
+    flipper.appendChild(front);
+    flipper.appendChild(back);
+    flipContainer.appendChild(flipper);
+    
     if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
-      card.classList.add('clickable');
-      card.onclick = () => {
+      flipContainer.classList.add('clickable');
+      flipContainer.style.cursor = 'pointer';
+      flipContainer.onclick = () => {
         if (tl.chosenTwo.has(i)) {
           tl.chosenTwo.delete(i);
+          flipper.classList.remove('flipped');
         } else if (tl.chosenTwo.size < 2) {
-          tl.chosenTwo.add(i);
+          // アニメーション再生
+          flipper.classList.add('flipped');
+          setTimeout(() => {
+            tl.chosenTwo.add(i);
+            render(stage);
+          }, 300);
         }
-        render(stage);
       };
     } else if (isMyTurn && tl.evidenceSeen) {
-      card.classList.add('clickable');
-      card.onclick = () => {
+      flipContainer.classList.add('clickable');
+      flipContainer.style.cursor = 'pointer';
+      flipContainer.onclick = () => {
         tl.guessChoice = i;
+        // 選択時にアニメーション
+        flipper.classList.add('flipped');
         render(stage);
       };
     }
     
-    spot.appendChild(card);
+    spot.appendChild(flipContainer);
     tableWrap.appendChild(spot);
   }
   wrap.appendChild(tableWrap);
@@ -708,7 +731,7 @@ function renderFinal(stage) {
     const winnerNames = winners.map(w => escapeHtml(w.name)).join('・');
     winnerBanner = `
       <div class="winner-banner">
-        <h2> ${t('winner')}</h2>
+        <h2>🏆 ${t('winner')}</h2>
         <div class="winner-name">${winnerNames}</div>
       </div>
     `;
