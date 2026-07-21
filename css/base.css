@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700;800&family=Zen+Old+Mincho:wght@400;600&display=swap');
+
+:root{
+  --ink:#211c16; --ink-soft:#4a4137;
+  --paper:#e9e0c8; --paper-dark:#d8caa2; --paper-deep:#c7b586;
+  --bamboo:#4f6b3f; --bamboo-dark:#2c3d22;
+  --blood:#8c2f26; --blood-soft:#a8493d; --gold:#a9813f;
+  --p0:#8c2f26; --p1:#2c4a6b; --p2:#4f6b3f; --p3:#6b4f8c; --p4:#8b4513;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0; overflow-x:hidden;}
+body{
+  background:linear-gradient(180deg,#f1e9d2 0%, #e6dab7 45%, #d9caa0 100%);
+  color:var(--ink); font-family:'Zen Old Mincho','Shippori Mincho',serif; min-height:100vh;
+}
+.stage{ max-width:800px; margin:0 auto; padding:20px 16px 120px; min-height:100vh; }
+h1,h2,h3{ font-family:'Shippori Mincho',serif; margin:0; }
+.row{ display:flex; gap:10px; flex-wrap:wrap; }
+.center{ text-align:center; }
+.hidden{ display:none !important; }
+
+.title-screen{ min-height:76vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+.title-eyebrow{ letter-spacing:.5em; font-size:11px; color:var(--ink-soft); margin-bottom:14px; }
+.title-main{ font-weight:800; font-size:clamp(40px,9vw,72px); writing-mode:vertical-rl; letter-spacing:.15em; margin:0 0 20px; }
+.title-sub{ font-size:13.5px; color:var(--ink-soft); max-width:400px; line-height:1.9; margin-bottom:30px;}
+.seal{ width:96px;height:96px; border:2px solid var(--blood); border-radius:50%; display:flex;align-items:center;justify-content:center; color:var(--blood); font-size:28px; font-weight:700; margin-bottom:24px; }
+.notice-box{ font-size:12px; color:var(--ink-soft); max-width:440px; line-height:1.9; background:#f4ecd6; border:1px solid var(--paper-deep); padding:14px 18px; margin-bottom:26px; text-align:left; }
+.notice-box b{ color:var(--ink); }
+
+.err-text{ color:var(--blood); font-size:12.5px; margin-top:8px; }
+.conn-note{ font-size:11px; color:var(--ink-soft); text-align:center; margin-top:20px; letter-spacing:.05em;}
+.conn-note.live::before{ content:'● '; color:var(--bamboo); }
+
+.lang-switch{
+  position:fixed; top:10px; right:10px;
+  z-index:60;
+}
+
+@media (max-width: 480px) {
+  .stage{ padding:10px 12px 140px; }
+}
