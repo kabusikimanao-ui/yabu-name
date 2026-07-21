@@ -40,6 +40,18 @@ export function render(stage) {
   if (roomView.phase === 'turns') { renderTurns(stage); return; }
   if (roomView.phase === 'reveal') { renderReveal(stage); return; }
   if (roomView.phase === 'final') { renderFinal(stage); return; }
+  
+  // チャットの表示制御
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) {
+    // タイトル画面・作成画面・参加画面・接続中は非表示
+    if (ui.screen === 'title' || ui.screen === 'create' || ui.screen === 'join' || ui.screen === 'connecting') {
+      chatPanel.style.display = 'none';
+    } else {
+      // ロビー・ゲーム中は表示
+      chatPanel.style.display = 'block';
+    }
+  }
 }
 
 function renderDisconnected(stage) {
@@ -95,6 +107,10 @@ function renderTitle(stage) {
   document.getElementById('toCreate').onclick = () => { ui.screen = 'create'; render(stage); };
   document.getElementById('toJoin').onclick = () => { ui.screen = 'join'; render(stage); };
   document.getElementById('titleRulesBtn').onclick = () => window.openRulesModal();
+  
+  // タイトル画面ではチャット非表示
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) chatPanel.style.display = 'none';
 }
 
 function renderConnecting(stage) {
@@ -102,6 +118,10 @@ function renderConnecting(stage) {
   wrap.className = 'title-screen fade';
   wrap.innerHTML = `<div class="seal">${t('connectingSeal')}</div><p class="title-sub">${t('connecting')}<span class="wait-dots"></span></p>`;
   stage.appendChild(wrap);
+  
+  // 接続中はチャット非表示
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) chatPanel.style.display = 'none';
 }
 
 function renderCreate(stage) {
@@ -149,6 +169,10 @@ function renderCreate(stage) {
   document.getElementById('doCreate').onclick = () => window.createRoom();
   document.getElementById('back1').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('createRulesBtn').onclick = () => window.openRulesModal();
+  
+  // 作成画面ではチャット非表示
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) chatPanel.style.display = 'none';
 }
 
 function renderJoin(stage) {
@@ -176,6 +200,10 @@ function renderJoin(stage) {
   document.getElementById('doJoin').onclick = () => window.joinRoom();
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
+  
+  // 参加画面ではチャット非表示
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) chatPanel.style.display = 'none';
 }
 
 function renderLobby(stage) {
@@ -211,6 +239,10 @@ function renderLobby(stage) {
   if (isHost) document.getElementById('startBtn').onclick = () => window.hostStartGame();
   document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
+  
+  // ロビーではチャット表示
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel) chatPanel.style.display = 'block';
 }
 
 function buildScoreboard(highlightIdx) {
