@@ -1,7 +1,7 @@
-import { escapeHtml, formatFlipValue, isFlipValue, PLAYER_COLORS, genCode } from './utils.js';
-import { t, getCurrentLang, setCurrentLang } from './i18n.js';
-import { loadGameState, clearGameState, getOrCreateToken } from './storage.js';
-import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, Net, broadcastChat, startHeartbeat } from './network.js';
+import { escapeHtml, formatFlipValue, isFlipValue, PLAYER_COLORS } from './utils.js';
+import { t, getCurrentLang } from './i18n.js';
+import { loadGameState, clearGameState } from './storage.js';
+import { getNetworkState, setNetworkState, Net } from './network.js';
 
 let ui = { screen: 'title', nameInput: '', codeInput: '', customCode: '', useCustomCode: false, expansionChoice: false, joinError: null, createError: null, disconnected: false };
 let turnLocal = null;
@@ -188,7 +188,6 @@ function renderLobby(stage) {
       <p>${t('lobbyDesc')}</p>
       <div class="room-code-display">${escapeHtml(roomView.code)}</div>
       <p style="font-size:12px;color:var(--ink-soft);">${t('expansionRule')}：${roomView.expansionEnabled ? t('use') : t('dontUse')}</p>
-      <div id="lobbySeats"></div>
       <div class="player-list" id="pList"></div>
       <div class="center" style="margin-top:20px;">
         ${isHost ? `<button class="btn primary" id="startBtn" ${roomView.players.length < 2 ? 'disabled' : ''}>${t('start')}（${roomView.players.length}/${t('maxPlayers')}）</button>` : `<div class="wait-panel"><div>${t('waiting')}<span class="wait-dots"></span></div></div>`}
@@ -200,7 +199,6 @@ function renderLobby(stage) {
   `;
   stage.appendChild(wrap);
 
-  // 簡易的なプレイヤーリスト表示
   const pl = document.getElementById('pList');
   roomView.players.forEach((p, i) => {
     const row = document.createElement('div');
@@ -215,5 +213,288 @@ function renderLobby(stage) {
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
 }
 
-// 以降、renderTurns, renderReveal, renderFinal 等は簡略化のため app.js で直接扱うか、必要に応じて追加します。
-// 今回はファイルサイズを抑えるため、主要な画面遷移の骨組みを提供しました。
+function buildScoreboard(highlightIdx) {
+  const { roomView, myPlayerIndex } = getNetworkState();
+  const sb = document.createElement('div');
+  sb.className = 'scoreboard';
+  roomView.players.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'score-chip' + (i === highlightIdx ? ' turn' : '');
+    el.style.setProperty('--pc', p.color);
+    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">⚠︎' + t('disconnectedTag') + '</span>' : ''}</span>
+      <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>`;
+    sb.appendChild(el);
+  });
+  return sb;
+}
+
+function renderAlibi(stage) {
+  const { roomView, myPlayerIndex } = getNetworkState();
+  if (alibiLocal.round !== roomView.round) { alibiLocal = { round: roomView.round, shown: false, values: null }; }
+  const n = roomView.players.length;
+  const neighbor = (myPlayerIndex + 1) % n;
+  const acked = roomView.alibiAcked[myPlayerIndex];
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fade';
+  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('alibi')}</span><span>${t('confirmedCount')} ${roomView.alibiAcked.filter(Boolean).length} / ${n}</span></div>`;
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  if (acked) {
+    card.innerHTML = `<h2>${t('alibiComplete')}</h2><p>${t('waitingOthers')}</p>`;
+  } else if (!alibiLocal.shown) {
+    card.innerHTML = `<h2>${t('alibi')}</h2><p>${t('alibiDesc')} <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiDesc2')}</p>`;
+  } else {
+    card.innerHTML = `<h2>${t('alibi')}</h2><p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>`;
+  }
+  wrap.appendChild(card);
+
+  const actionArea = document.createElement('div');
+  actionArea.className = 'center';
+  if (!acked) {
+    if (!alibiLocal.shown) {
+      actionArea.innerHTML = `<button class="btn" id="viewAlibi">${t('checkTiles')}</button>`;
+    } else {
+      actionArea.innerHTML = `<button class="btn primary" id="closeAlibi">${t('hideNext')}</button>`;
+    }
+  }
+  wrap.appendChild(actionArea);
+  wrap.appendChild(buildScoreboard(-1));
+  
+  const p = document.createElement('p');
+  p.className = 'center';
+  p.style.cssText = 'margin-top:18px;';
+  const rulesBtn = document.createElement('button');
+  rulesBtn.className = 'rules-link';
+  rulesBtn.textContent = t('howToPlay');
+  rulesBtn.onclick = () => window.openRulesModal();
+  const sep = document.createTextNode(' ・ ');
+  const leaveBtn = document.createElement('button');
+  leaveBtn.className = 'btn small';
+  leaveBtn.style.opacity = '.6';
+  leaveBtn.textContent = t('leave');
+  leaveBtn.onclick = () => window.leaveRoom();
+  p.appendChild(rulesBtn);
+  p.appendChild(sep);
+  p.appendChild(leaveBtn);
+  wrap.appendChild(p);
+  
+  stage.appendChild(wrap);
+
+  const va = document.getElementById('viewAlibi');
+  const ca = document.getElementById('closeAlibi');
+  if (!acked && !alibiLocal.shown && va) {
+    va.onclick = async () => {
+      const { result, error } = await Net.alibi();
+      if (error) return;
+      alibiLocal.values = result;
+      alibiLocal.shown = true;
+      render(stage);
+    };
+  } else if (!acked && alibiLocal.shown && ca) {
+    ca.onclick = async () => { await Net.ackAlibi(); };
+  }
+}
+
+function renderTurns(stage) {
+  const { roomView, myPlayerIndex } = getNetworkState();
+  ensureTurnLocal(roomView);
+  const curIdx = roomView.turnOrder[roomView.currentPos];
+  const isMyTurn = curIdx === myPlayerIndex;
+  const tl = turnLocal;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fade';
+  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
+  wrap.appendChild(buildScoreboard(curIdx));
+
+  const p = document.createElement('p');
+  p.className = 'center';
+  p.style.cssText = 'margin-top:18px;';
+  const rulesBtn = document.createElement('button');
+  rulesBtn.className = 'rules-link';
+  rulesBtn.textContent = t('howToPlay');
+  rulesBtn.onclick = () => window.openRulesModal();
+  const sep = document.createTextNode(' ・ ');
+  const leaveBtn = document.createElement('button');
+  leaveBtn.className = 'btn small';
+  leaveBtn.style.opacity = '.6';
+  leaveBtn.textContent = t('leave');
+  leaveBtn.onclick = () => window.leaveRoom();
+  p.appendChild(rulesBtn);
+  p.appendChild(sep);
+  p.appendChild(leaveBtn);
+  wrap.appendChild(p);
+
+  // 簡易的な容疑者カード表示
+  const suspectsRow = document.createElement('div');
+  suspectsRow.className = 'suspects-row';
+  for (let i = 0; i < 3; i++) {
+    const card = document.createElement('div');
+    card.className = 'suspect-card' + (tl.guessChoice === i ? ' chosen' : '');
+    card.innerHTML = `
+      <div class="s-label">${labels[i]}</div>
+      <div class="head">${tl.peekedValues && tl.peekedValues[i] !== undefined ? formatFlipValue(tl.peekedValues[i]) : ''}</div>
+      <div class="body">${tl.peekedValues && tl.peekedValues[i] !== undefined ? t('confirmed') : '？'}</div>
+    `;
+    if (isMyTurn && tl.evidenceSeen) {
+      card.classList.add('clickable');
+      card.onclick = () => { tl.guessChoice = i; render(stage); };
+    }
+    suspectsRow.appendChild(card);
+  }
+  wrap.appendChild(suspectsRow);
+
+  if (!isMyTurn) {
+    const wp = document.createElement('div');
+    wp.className = 'wait-panel';
+    wp.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('currentTurn')}</p><div class="who" style="color:${roomView.players[curIdx].color}">${escapeHtml(roomView.players[curIdx].name)}</div><p style="font-size:12.5px;color:var(--ink-soft);">${t('listeningTestimony')}<span class="wait-dots"></span></p>`;
+    wrap.appendChild(wp);
+    stage.appendChild(wrap);
+    return;
+  }
+
+  const actionArea = document.createElement('div');
+  actionArea.className = 'center';
+  actionArea.style.marginTop = '18px';
+
+  if (!tl.evidenceSeen) {
+    actionArea.innerHTML = `<button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>`;
+    wrap.appendChild(actionArea);
+    stage.appendChild(wrap);
+    const ve = document.getElementById('viewEvidence');
+    if (ve) {
+      ve.onclick = async () => {
+        const { result, error } = await Net.peek([]);
+        if (error) return;
+        tl.peekedValues = result.values;
+        tl.evidenceSeen = true;
+        render(stage);
+      };
+    }
+    return;
+  }
+
+  if (tl.guessChoice === null || tl.guessChoice === undefined) {
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('tapCulprit')}</p>`;
+  } else {
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);margin-bottom:12px;">${t('currentlySelected')} <strong style="color:var(--blood);">${labels[tl.guessChoice]}</strong> ${t('selected')}</p>`;
+    const b = document.createElement('button');
+    b.className = 'btn primary';
+    b.textContent = (roomView.currentPos === roomView.players.length - 1) ? t('finalTruth') : t('next');
+    b.onclick = async () => {
+      const guessChoice = tl.guessChoice;
+      const { error } = await Net.guess(guessChoice);
+      if (error) return;
+      turnLocal = null;
+    };
+    actionArea.appendChild(b);
+  }
+  wrap.appendChild(actionArea);
+  stage.appendChild(wrap);
+}
+
+function renderReveal(stage) {
+  const { roomView, isHost } = getNetworkState();
+  const culprit = roomView.culpritIndex;
+  const s = roomView.center.suspects;
+  const hasFive = s.includes(5);
+  let explain;
+  if (culprit === null || culprit === undefined) { explain = t('impossible'); }
+  else if (hasFive) { explain = `${t('hasFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
+  else { explain = `${t('noFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fade';
+  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('reveal')}</span></div>`;
+
+  const suspectsRow = document.createElement('div');
+  suspectsRow.className = 'suspects-row';
+  for (let i = 0; i < 3; i++) {
+    const card = document.createElement('div');
+    card.className = 'suspect-card' + (i === culprit ? ' culprit' : '');
+    card.innerHTML = `
+      <div class="s-label">${labels[i]}</div>
+      <div class="head ${isFlipValue(s[i]) ? 'is-flip' : ''}">${formatFlipValue(s[i])}</div>
+      <div class="body">${t('person')}</div>
+    `;
+    suspectsRow.appendChild(card);
+  }
+  wrap.appendChild(suspectsRow);
+
+  const explainBox = document.createElement('div');
+  explainBox.className = 'reveal-explain';
+  explainBox.textContent = explain;
+  wrap.appendChild(explainBox);
+
+  const resList = document.createElement('div');
+  resList.className = 'resolution-list';
+  (roomView.resolutionLog || []).forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'resolution-row ' + (r.correct ? 'correct' : 'wrong');
+    row.innerHTML = `<span class="res-icon">${r.icon || ''}</span>${escapeHtml(r.text)}`;
+    resList.appendChild(row);
+  });
+  wrap.appendChild(resList);
+  wrap.appendChild(buildScoreboard(-1));
+  
+  const btnArea = document.createElement('div');
+  btnArea.className = 'center';
+  btnArea.style.marginTop = '22px';
+  const anyOver = roomView.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
+  if (isHost) {
+    const b = document.createElement('button');
+    b.className = 'btn primary';
+    b.textContent = anyOver ? t('viewFinal') : t('nextRound');
+    b.onclick = () => window.hostAdvanceAfterReveal();
+    btnArea.appendChild(b);
+  } else {
+    btnArea.innerHTML = `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHost')}<span class="wait-dots"></span></p>`;
+  }
+  wrap.appendChild(btnArea);
+  stage.appendChild(wrap);
+}
+
+function renderFinal(stage) {
+  const { roomView, isHost } = getNetworkState();
+  const minFaceDown = Math.min(...roomView.players.map(p => p.faceDown));
+  const winners = roomView.players.filter(p => p.faceDown === minFaceDown);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fade';
+  
+  let winnerBanner = '';
+  if (winners.length > 0) {
+    const winnerNames = winners.map(w => escapeHtml(w.name)).join('・');
+    winnerBanner = `
+      <div class="winner-banner">
+        <h2>🏆 ${t('winner')}</h2>
+        <div class="winner-name">${winnerNames}</div>
+      </div>
+    `;
+  }
+  
+  wrap.innerHTML = `
+    <div class="card"><h2>${t('gameEnd')}</h2><p>${roomView.round} ${t('allRoundsEnd')}</p></div>
+    ${winnerBanner}
+    <div class="card">
+      <h2>${getCurrentLang() === 'ja' ? '最終成績' : 'Final Results'}</h2>
+      ${roomView.players.slice().sort((a, b) => a.faceDown - b.faceDown).map(p => `
+        <div class="score-chip" style="width:100%;margin-bottom:8px;border-left:4px solid ${p.color};">
+          <span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${winners.includes(p) ? ' ★' + t('winner') : ''}</span>
+          <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>
+        </div>`).join('')}
+    </div>
+    <div class="center" style="margin-top:24px;">
+      ${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHostFinal')}</p>`}
+      <button class="btn" id="leaveFinal" style="margin-left:10px;">${t('leave')}</button>
+    </div>
+  `;
+  stage.appendChild(wrap);
+  
+  const pa = document.getElementById('playAgain');
+  const lf = document.getElementById('leaveFinal');
+  if (isHost && pa) pa.onclick = () => window.hostPlayAgain();
+  if (lf) lf.onclick = () => window.leaveRoom();
+}
