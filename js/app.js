@@ -119,4 +119,95 @@ window.leaveRoom = function() {
   
   setNetworkState({ isHost: false, peer: null, hostConn: null, connections: new Map(), room: null, roomView: null, myPlayerIndex: -1 });
   const { ui } = getUIState();
-  ui.screen = 'title'; ui.nameInput = ''; ui.codeInput = ''; ui.customCode = ''; ui.useCustomCode = false; ui.expansionChoice = false; ui.joinError = null
+  ui.screen = 'title'; ui.nameInput = ''; ui.codeInput = ''; ui.customCode = ''; ui.useCustomCode = false; ui.expansionChoice = false; ui.joinError = null; ui.createError = null; ui.disconnected = false;
+  setUIState({ ui, turnLocal: null, alibiLocal: { round: null, shown: false, values: null }, chatMessages: [], chatCollapsed: false });
+  clearGameState();
+  render(stage);
+};
+
+window.hostStartGame = function() {
+  const { room } = getNetworkState();
+  if (room.players.length < 2) return;
+  buildRoundState(room);
+  hostBroadcast();
+};
+
+// 言語切り替え
+document.getElementById('langBtn').onclick = function() {
+  const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
+  setCurrentLang(newLang);
+  this.textContent = newLang === 'ja' ? 'English' : '日本語';
+  const { labels } = getUIState();
+  setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
+  render(stage);
+};
+
+// チャット初期化
+function initChat() {
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('chatSend');
+  const header = document.getElementById('chatHeader');
+
+  if (header) {
+    header.onclick = function() {
+      const { chatCollapsed } = getUIState();
+      const newCollapsed = !chatCollapsed;
+      setUIState({ chatCollapsed: newCollapsed });
+      const panel = document.getElementById('chatPanel');
+      if (panel) {
+        if (newCollapsed) panel.classList.add('collapsed');
+        else panel.classList.remove('collapsed');
+      }
+    };
+  }
+
+  if (!input || !send) return;
+  send.onclick = () => {
+    const text = input.value.trim();
+    if (!text) return;
+    Net.chat(text);
+    input.value = '';
+  };
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') send.click();
+  });
+}
+
+// チャットメッセージ受信時の処理
+window.onChatMessage = function(chatMsg) {
+  const { chatMessages } = getUIState();
+  chatMessages.push(chatMsg);
+  if (chatMessages.length > 50) chatMessages.shift();
+  setUIState({ chatMessages });
+  
+  const messages = document.getElementById('chatMessages');
+  if (messages) {
+    const lang = getCurrentLang();
+    messages.innerHTML = chatMessages.map(m => {
+      const time = new Date(m.ts).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+      return `<div class="chat-message"><span class="chat-time">[${escapeHtml(time)}]</span><span class="chat-name">${escapeHtml(m.name)}:</span> <span class="chat-text">${escapeHtml(m.text)}</span></div>`;
+    }).join('');
+    messages.scrollTop = messages.scrollHeight;
+  }
+  
+  const panel = document.getElementById('chatPanel');
+  if (panel) panel.style.display = 'block';
+};
+
+// ゲーム状態変更時の処理
+window.onGameStateChanged = function(view) {
+  render(stage);
+};
+
+// ホストのbeforeunload警告
+window.addEventListener('beforeunload', (e) => {
+  const { isHost, room } = getNetworkState();
+  if (isHost && room && room.phase !== 'final' && room.phase !== 'lobby') {
+    e.preventDefault();
+    e.returnValue = t('tabCloseWarning');
+  }
+});
+
+// 初期化
+initChat();
+render(stage);
