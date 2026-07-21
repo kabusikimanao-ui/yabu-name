@@ -57,7 +57,9 @@ export function resolveChipsInto(doc) {
 
 export function computeConnectedFlags(room, connections) {
   const flags = room.players.map((_, i) => i === 0);
-  connections.forEach(({ conn, playerIndex }) => { if (conn.open) flags[playerIndex] = true; });
+  if (connections) {
+    connections.forEach(({ conn, playerIndex }) => { if (conn && conn.open) flags[playerIndex] = true; });
+  }
   return flags;
 }
 
