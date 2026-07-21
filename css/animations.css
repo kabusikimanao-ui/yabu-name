@@ -19,3 +19,60 @@
 
 .fade{ animation:f .4s ease both; }
 @keyframes f{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+/* カードめくりアニメーション */
+.card-flip-container {
+  perspective: 1000px;
+  width: 100px;
+  height: 160px;
+  display: inline-block;
+  margin: 0 8px;
+}
+
+.card-flipper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+
+.card-flipper.flipped {
+  transform: rotateY(180deg);
+}
+
+.card-front, .card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  border-radius: 50px 50px 20px 20px;
+  box-shadow: 0 8px 20px rgba(0,0,0,.15);
+}
+
+.card-front {
+  background: var(--paper);
+  border: 3px solid var(--paper-deep);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-back {
+  background: var(--paper);
+  border: 3px solid var(--bamboo);
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-back .g-head.is-flip {
+  background: var(--blood);
+  color: #fff;
+  border-color: var(--blood-soft);
+  box-shadow: 0 0 12px rgba(140,47,38,.6);
+  animation: flipGlow 2s ease-in-out infinite;
+  background-image: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,.1) 3px, rgba(255,255,255,.1) 6px);
+}
