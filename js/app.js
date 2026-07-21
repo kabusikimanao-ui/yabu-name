@@ -286,7 +286,14 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = t('tabCloseWarning');
   }
 });
-
+// URLパラメータの解析（部屋番号自動入力）
+const urlParams = new URLSearchParams(window.location.search);
+const roomCodeFromUrl = urlParams.get('room');
+if (roomCodeFromUrl) {
+  const { ui } = getUIState();
+  ui.codeInput = roomCodeFromUrl.toUpperCase();
+  ui.screen = 'join';
+}
 // 初期化
 initChat();
 render(stage);
