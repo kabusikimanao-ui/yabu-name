@@ -186,6 +186,42 @@ function renderJoin(stage) {
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
   
+  // URLコピーボタンの追加
+  if (ui.codeInput) {
+    const copyArea = document.createElement('div');
+    copyArea.className = 'center';
+    copyArea.style.marginTop = '10px';
+    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
+    
+    const urlBox = document.createElement('div');
+    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
+    urlBox.textContent = `${window.location.origin}${window.location.pathname}?room=${ui.codeInput}`;
+    copyArea.appendChild(urlBox);
+    
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn small';
+    copyBtn.textContent = 'URLをコピー';
+    copyBtn.onclick = () => {
+      const url = `${window.location.origin}${window.location.pathname}?room=${ui.codeInput}`;
+      navigator.clipboard.writeText(url).then(() => {
+        copyBtn.textContent = 'コピーしました！';
+        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+      }).catch(() => {
+        // クリップボードAPIが失敗した場合のフォールバック
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        copyBtn.textContent = 'コピーしました！';
+        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+      });
+    };
+    copyArea.appendChild(copyBtn);
+    stage.appendChild(copyArea);
+  }
+  
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -223,6 +259,41 @@ function renderLobby(stage) {
   if (isHost) document.getElementById('startBtn').onclick = () => window.hostStartGame();
   document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
+  
+  // ホスト用のURLコピーボタン
+  if (isHost) {
+    const copyArea = document.createElement('div');
+    copyArea.className = 'center';
+    copyArea.style.marginTop = '10px';
+    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
+    
+    const urlBox = document.createElement('div');
+    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
+    urlBox.textContent = `${window.location.origin}${window.location.pathname}?room=${roomView.code}`;
+    copyArea.appendChild(urlBox);
+    
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn small';
+    copyBtn.textContent = 'URLをコピー';
+    copyBtn.onclick = () => {
+      const url = `${window.location.origin}${window.location.pathname}?room=${roomView.code}`;
+      navigator.clipboard.writeText(url).then(() => {
+        copyBtn.textContent = 'コピーしました！';
+        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+      }).catch(() => {
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        copyBtn.textContent = 'コピーしました！';
+        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+      });
+    };
+    copyArea.appendChild(copyBtn);
+    stage.appendChild(copyArea);
+  }
   
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'block';
@@ -637,7 +708,7 @@ function renderFinal(stage) {
     const winnerNames = winners.map(w => escapeHtml(w.name)).join('・');
     winnerBanner = `
       <div class="winner-banner">
-        <h2>🏆 ${t('winner')}</h2>
+        <h2> ${t('winner')}</h2>
         <div class="winner-name">${winnerNames}</div>
       </div>
     `;
