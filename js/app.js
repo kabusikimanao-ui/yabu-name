@@ -1,10 +1,9 @@
-import { genCode, generateRoomURL } from './utils.js';
+import { escapeHtml, genCode, generateRoomURL } from './utils.js';
 import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
 import { getOrCreateToken, clearGameState, getMatchHistory, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
 import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
 import { getNetworkState, setNetworkState, hostBroadcast, hostHandleRequest, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded } from './network.js';
 import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
-import { escapeHtml } from './utils.js';
 
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
 const stage = document.getElementById('stage');
@@ -235,7 +234,7 @@ function sendTurnNotification(playerName) {
   try {
     new Notification(t('notificationTitle'), {
       body: `${playerName} - ${t('notificationBody')}`,
-      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90"></text></svg>'
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔍</text></svg>'
     });
   } catch (e) {}
 }
@@ -270,6 +269,7 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
   
+  // 【修正済み】 "= >" の間のスペースを削除して "=>" にしました
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box">
@@ -494,6 +494,7 @@ window.onChatMessage = function(chatMsg) {
 window.onGameStateChanged = function(view) {
   render(stage);
   
+  // Issue #4: 手番通知
   if (view && view.phase === 'turns') {
     const { myPlayerIndex } = getNetworkState();
     const curIdx = view.turnOrder[view.currentPos];
@@ -502,6 +503,7 @@ window.onGameStateChanged = function(view) {
     }
   }
   
+  // Issue #20: ボットターン処理
   if (view && view.phase === 'turns') {
     setTimeout(() => {
       const { isHost } = getNetworkState();
