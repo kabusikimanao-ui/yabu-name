@@ -35,6 +35,7 @@ export function openTutorialModal() {
 
   document.body.appendChild(overlay);
 
+  // 【修正点】 "= >" を "=>" に修正
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box" role="document">
@@ -79,8 +80,8 @@ export function openHistoryModal() {
   overlay.setAttribute('aria-modal', 'true');
 
   const history = getMatchHistory();
-
   let content = '';
+
   if (!history || history.length === 0) {
     content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
   } else {
@@ -122,8 +123,8 @@ export function openStatsModal() {
 
   const allStats = getAllPlayerStats();
   const playerNames = Object.keys(allStats || {});
-
   let content = '';
+
   if (playerNames.length === 0) {
     content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
   } else {
