@@ -910,4 +910,16 @@ function renderFinal(stage) {
       ${worstGuess.length ? `<p>${t('worstGuesser')}：${worstGuess.map(p => escapeHtml(p.name)).join('・')}</p>` : ''}
     </div>
     <div class="center" style="margin-top:24px;">
-      ${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var
+      ${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? 'ホストの操作を待っています…' : 'Waiting for host…'}</p>`}
+      <button class="btn" id="leaveFinal" style="margin-left:10px;">${t('leave')}</button>
+      <div style="margin-top:10px;"><button class="rules-link" id="finalRulesBtn">${t('howToPlay')}</button></div>
+    </div>
+  `;
+  stage.appendChild(wrap);
+  const pa = document.getElementById('playAgain');
+  const lf = document.getElementById('leaveFinal');
+  const frb = document.getElementById('finalRulesBtn');
+  if (isHost && pa) pa.onclick = () => window.hostPlayAgain();
+  if (lf) lf.onclick = () => window.leaveRoom();
+  if (frb) frb.onclick = () => window.openRulesModal();
+}
