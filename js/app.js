@@ -1,4 +1,4 @@
-import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
+import { escapeHtml, genCode, generateRoomURL } from './utils.js';
 import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
 import { getOrCreateToken, clearGameState, getMatchHistory, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
 import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
@@ -420,7 +420,7 @@ window.openRulesModal = function() {
         <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : "Touch suspect cards to peek at 2 people's numbers. Finally, place your chip on the suspect you believe is the culprit."}</li>
         <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : "Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2."}</li>
       </ul>
-      <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <h4>${lang === 'ja' ? ' 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
       <ul>
         <li>${lang === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
         <li>${lang === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
