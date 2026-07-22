@@ -1,14 +1,15 @@
 import { t, getCurrentLang } from '../i18n.js';
+import { setTutorialCompleted, getMatchHistory, getAllPlayerStats } from '../storage.js';
 import { escapeHtml } from '../utils.js';
-import { getMatchHistory, getAllPlayerStats, setTutorialCompleted } from '../storage.js';
 
+// ===== Issue #13: エモート表示（モーダル系と一緒にコントローラへ） =====
 export function showEmote(emote, playerName) {
   const display = document.createElement('div');
   display.className = 'emote-display';
   display.textContent = emote;
   display.setAttribute('aria-label', `${playerName}: ${emote}`);
   document.body.appendChild(display);
-  
+
   setTimeout(() => {
     display.classList.add('fade-out');
     setTimeout(() => {
@@ -17,17 +18,26 @@ export function showEmote(emote, playerName) {
   }, 2500);
 }
 
+// ===== Issue #12: チュートリアル =====
 export function openTutorialModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
-  const steps = [t('tutorialStep1'), t('tutorialStep2'), t('tutorialStep3'), t('tutorialStep4')];
-  
+
+  const steps = [
+    t('tutorialStep1'),
+    t('tutorialStep2'),
+    t('tutorialStep3'),
+    t('tutorialStep4')
+  ];
+
+  // Append overlay first so querySelector can find elements inside it reliably
+  document.body.appendChild(overlay);
+
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
-      <div class="modal-box rules-box">
+      <div class="modal-box rules-box" role="document">
         <h3>${t('tutorial')} (${stepIdx + 1}/${steps.length})</h3>
         <p style="font-size:15px; line-height:1.8; margin:20px 0;">${steps[stepIdx]}</p>
         <div class="center" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
@@ -37,81 +47,127 @@ export function openTutorialModal() {
         </div>
       </div>
     `;
-    
-    const prev = document.getElementById('tutPrev');
-    const next = document.getElementById('tutNext');
-    const finish = document.getElementById('tutFinish');
-    const skip = document.getElementById('tutSkip');
-    
+
+    // Use overlay.querySelector to scope lookups to the modal content
+    const prev = overlay.querySelector('#tutPrev');
+    const next = overlay.querySelector('#tutNext');
+    const finish = overlay.querySelector('#tutFinish');
+    const skip = overlay.querySelector('#tutSkip');
+
     if (prev) prev.onclick = () => renderStep(stepIdx - 1);
     if (next) next.onclick = () => renderStep(stepIdx + 1);
-    if (finish) finish.onclick = () => { setTutorialCompleted(); document.body.removeChild(overlay); };
-    if (skip) skip.onclick = () => { setTutorialCompleted(); document.body.removeChild(overlay); };
+    if (finish) finish.onclick = () => {
+      setTutorialCompleted();
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    if (skip) skip.onclick = () => {
+      setTutorialCompleted();
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+
+    // Accessibility: focus the first actionable button
+    const firstButton = prev || next || finish || skip;
+    if (firstButton) firstButton.focus();
   };
-  
+
   renderStep(0);
-  document.body.appendChild(overlay);
 }
 
+// ===== Issue #9: 対戦履歴 =====
 export function openHistoryModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const history = getMatchHistory();
-  let content = history.length === 0 
-    ? `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`
-    : history.map(h => {
-        const date = new Date(h.timestamp).toLocaleDateString(getCurrentLang() === 'ja' ? 'ja-JP' : 'en-US');
-        const winners = (h.winners || []).join('・');
-        return `<div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--gold); margin-bottom:8px; border-radius:0 8px 8px 0;">
+
+  let content = '';
+  if (!history || history.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = history.map(h => {
+      const date = new Date(h.timestamp).toLocaleDateString(getCurrentLang() === 'ja' ? 'ja-JP' : 'en-US');
+      const winners = (h.winners || []).join('・');
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--gold); margin-bottom:8px; border-radius:0 8px 8px 0;">
           <div style="font-size:12px; color:var(--ink-soft);">${date} · ${t('round')} ${h.round || 1}</div>
           <div style="font-size:13px; margin-top:4px;">${t('winner')}: <strong style="color:var(--blood);">${escapeHtml(winners)}</strong></div>
-          <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">${(h.players || []).join('・')}</div>
-        </div>`;
-      }).join('');
-  
-  overlay.innerHTML = `<div class="modal-box rules-box"><h3>${t('history')}</h3>${content}<div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeHistory">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div></div>`;
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">${(h.players || []).map(escapeHtml).join('・')}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('history')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeHistory">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+
   document.body.appendChild(overlay);
-  document.getElementById('closeHistory').onclick = () => document.body.removeChild(overlay);
+  const closeBtn = overlay.querySelector('#closeHistory');
+  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+  // focus for accessibility
+  if (closeBtn) closeBtn.focus();
 }
 
+// ===== Issue #10: 統計 =====
 export function openStatsModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const allStats = getAllPlayerStats();
-  const playerNames = Object.keys(allStats);
-  
-  let content = playerNames.length === 0
-    ? `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`
-    : playerNames.map(name => {
-        const s = allStats[name];
-        const winRate = s.totalGames > 0 ? ((s.wins / s.totalGames) * 100).toFixed(1) : '0.0';
-        const avgFail = s.totalGames > 0 ? (s.totalFailChips / s.totalGames).toFixed(1) : '0.0';
-        const correctRate = s.totalGuesses > 0 ? ((s.totalCorrectGuesses / s.totalGuesses) * 100).toFixed(1) : '0.0';
-        return `<div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--bamboo); margin-bottom:8px; border-radius:0 8px 8px 0;">
+  const playerNames = Object.keys(allStats || {});
+
+  let content = '';
+  if (playerNames.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = playerNames.map(name => {
+      const s = allStats[name];
+      const winRate = s.totalGames > 0 ? ((s.wins / s.totalGames) * 100).toFixed(1) : '0.0';
+      const avgFail = s.totalGames > 0 ? (s.totalFailChips / s.totalGames).toFixed(1) : '0.0';
+      const correctRate = s.totalGuesses > 0 ? ((s.totalCorrectGuesses / s.totalGuesses) * 100).toFixed(1) : '0.0';
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--bamboo); margin-bottom:8px; border-radius:0 8px 8px 0;">
           <div style="font-size:14px; font-weight:600; color:var(--ink);">${escapeHtml(name)}</div>
           <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">
-            ${t('totalGames')}: ${s.totalGames} · ${t('winRate')}: ${winRate}% · ${t('avgFailChips')}: ${avgFail} · ${t('correctRate')}: ${correctRate}%
+            ${t('totalGames')}: ${s.totalGames} · 
+            ${t('winRate')}: ${winRate}% · 
+            ${t('avgFailChips')}: ${avgFail} · 
+            ${t('correctRate')}: ${correctRate}%
           </div>
-        </div>`;
-      }).join('');
-  
-  overlay.innerHTML = `<div class="modal-box rules-box"><h3>${t('stats')}</h3>${content}<div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeStats">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div></div>`;
+        </div>
+      `;
+    }).join('');
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('stats')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeStats">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+
   document.body.appendChild(overlay);
-  document.getElementById('closeStats').onclick = () => document.body.removeChild(overlay);
+  const closeBtn = overlay.querySelector('#closeStats');
+  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+  if (closeBtn) closeBtn.focus();
 }
 
+// ===== ルールモーダル =====
 export function openRulesModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const lang = getCurrentLang();
   overlay.innerHTML = `
     <div class="modal-box rules-box">
@@ -122,7 +178,7 @@ export function openRulesModal() {
       <p>${lang === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
       <h4>${lang === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
       <ul>
-        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
+        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
         <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
       </ul>
       <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
@@ -141,6 +197,9 @@ export function openRulesModal() {
       <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${lang === 'ja' ? '閉じる' : 'Close'}</button></div>
     </div>
   `;
+
   document.body.appendChild(overlay);
-  document.getElementById('closeRules').onclick = () => document.body.removeChild(overlay);
+  const closeBtn = overlay.querySelector('#closeRules');
+  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+  if (closeBtn) closeBtn.focus();
 }
