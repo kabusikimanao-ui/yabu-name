@@ -1,10 +1,11 @@
+// js/views/auth-view.js
 import { escapeHtml, generateRoomURL } from '../utils.js';
 import { t, getCurrentLang } from '../i18n.js';
 import { loadGameState, clearGameState, getSettings, updateSettings, isTutorialCompleted } from '../storage.js';
 import { getNetworkState } from '../network.js';
-import { getUIState, setUIState, render } from '../ui-render.js';
+import { getUIState, setUIState } from '../ui-state.js';
+import { render } from '../ui-render.js';
 
-// ===== 切断画面 =====
 export function renderDisconnected(stage) {
   const { ui } = getUIState();
   const wrap = document.createElement('div');
@@ -19,7 +20,6 @@ export function renderDisconnected(stage) {
   };
 }
 
-// ===== タイトル画面 =====
 export function renderTitle(stage) {
   const { ui } = getUIState();
   const wrap = document.createElement('div');
@@ -82,7 +82,6 @@ export function renderTitle(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
-// ===== 接続中画面 =====
 export function renderConnecting(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'title-screen fade';
@@ -92,7 +91,6 @@ export function renderConnecting(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
-// ===== 部屋作成画面 =====
 export function renderCreate(stage) {
   const { ui } = getUIState();
   const wrap = document.createElement('div');
@@ -144,7 +142,6 @@ export function renderCreate(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
-// ===== 部屋参加画面 =====
 export function renderJoin(stage) {
   const { ui } = getUIState();
   const wrap = document.createElement('div');
