@@ -1,9 +1,11 @@
+// js/views/game-view.js
 import { escapeHtml, formatFlipValue, isFlipValue } from '../utils.js';
 import { t, getCurrentLang } from '../i18n.js';
 import { getNetworkState, Net } from '../network.js';
-import { getUIState, setUIState, ensureTurnLocal, render } from '../ui-render.js';
+import { getUIState, setUIState, ensureTurnLocal } from '../ui-state.js';
+import { render } from '../ui-render.js';
+import { buildScoreboard } from './lobby-view.js';
 
-// ===== アリバイ確認 =====
 export function renderAlibi(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
   const { alibiLocal } = getUIState();
@@ -67,8 +69,6 @@ export function renderAlibi(stage) {
     }
   }
   wrap.appendChild(actionArea);
-  
-  const { buildScoreboard } = await import('./lobby-view.js');
   wrap.appendChild(buildScoreboard(-1));
   
   const p = document.createElement('p');
@@ -97,7 +97,8 @@ export function renderAlibi(stage) {
     va.onclick = async () => {
       const { result, error } = await Net.alibi();
       if (error) return;
-      setUIState({ alibiLocal: { ...alibiLocal, values: result, shown: true } });
+      const current = getUIState();
+      setUIState({ alibiLocal: { ...current.alibiLocal, values: result, shown: true } });
       render(stage);
     };
   } else if (!acked && alibiLocal.shown && ca) {
@@ -105,7 +106,6 @@ export function renderAlibi(stage) {
   }
 }
 
-// ===== 証言フェーズ =====
 export function renderTurns(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
   ensureTurnLocal(roomView);
@@ -117,8 +117,6 @@ export function renderTurns(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
-  
-  const { buildScoreboard } = await import('./lobby-view.js');
   wrap.appendChild(buildScoreboard(curIdx));
   
   if (alibiLocal.shown && alibiLocal.values) {
@@ -350,7 +348,6 @@ export function renderTurns(stage) {
   stage.appendChild(wrap);
 }
 
-// ===== 真相解明 =====
 export function renderReveal(stage) {
   const { roomView, isHost } = getNetworkState();
   const { labels } = getUIState();
@@ -394,8 +391,6 @@ export function renderReveal(stage) {
     resList.appendChild(row);
   });
   wrap.appendChild(resList);
-  
-  const { buildScoreboard } = await import('./lobby-view.js');
   wrap.appendChild(buildScoreboard(-1));
   
   const btnArea = document.createElement('div');
@@ -415,7 +410,6 @@ export function renderReveal(stage) {
   stage.appendChild(wrap);
 }
 
-// ===== 最終結果 =====
 export function renderFinal(stage) {
   const { roomView, isHost } = getNetworkState();
   const minFaceDown = Math.min(...roomView.players.map(p => p.faceDown));
