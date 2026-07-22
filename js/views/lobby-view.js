@@ -1,9 +1,10 @@
+// js/views/lobby-view.js
 import { escapeHtml, generateRoomURL } from '../utils.js';
 import { t } from '../i18n.js';
 import { getNetworkState } from '../network.js';
-import { getUIState, render } from '../ui-render.js';
+import { getUIState, setUIState } from '../ui-state.js';
+import { render } from '../ui-render.js';
 
-// ===== ロビー画面 =====
 export function renderLobby(stage) {
   const { roomView, isHost, myPlayerIndex } = getNetworkState();
   const wrap = document.createElement('div');
@@ -75,7 +76,6 @@ export function renderLobby(stage) {
   if (chatPanel) chatPanel.style.display = 'block';
 }
 
-// ===== スコアボード =====
 export function buildScoreboard(highlightIdx) {
   const { roomView, myPlayerIndex } = getNetworkState();
   const sb = document.createElement('div');
