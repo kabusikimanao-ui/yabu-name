@@ -1,8 +1,8 @@
 import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
-import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
-import { getOrCreateToken, clearGameState, getMatchHistory, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
-import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
-import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, sendToHost, clientHandleMessage, startHeartbeat, Net } from './network.js';
+import { t, getCurrentLang, setCurrentLang, triggerLangChange, getSupportedLangs, getLangName } from './i18n.js';
+import { saveGameState, loadGameState, clearGameState, getOrCreateToken, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
+import { buildRoundState, resolveChipsInto, actJoin, redact, finalizeGame, advanceRound, processBotTurnIfNeeded, addBot } from './game-core.js';
+import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded as netProcessBotTurn } from './network.js';
 import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
 
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
@@ -161,15 +161,8 @@ window.hostStartGame = function() {
 // ===== ラウンド進行 =====
 window.hostAdvanceAfterReveal = function() {
   const { room } = getNetworkState();
-  const anyOver = room.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
-  if (anyOver) { 
-    room.phase = 'final'; 
-  } else {
-    room.round += 1;
-    room.startIdx = (room.startIdx + 1) % room.players.length;
-    buildRoundState(room);
-  }
-  hostBroadcast();
+  const result = advanceRound(room);
+  if (result.changed) hostBroadcast();
 };
 
 // ===== もう一度 =====
@@ -284,7 +277,7 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
   
-  // 【修正済み】 "= >" の間のスペースを削除して "=>" にしました
+  // 【修正点】 "= >" の間のスペースを削除して "=>" にしました
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box">
@@ -516,6 +509,23 @@ window.onGameStateChanged = function(view) {
     if (curIdx === myPlayerIndex) {
       sendTurnNotification(view.players[myPlayerIndex]?.name);
     }
+  }
+  
+  // Issue #20: ボットターン処理
+  if (view && view.phase === 'turns') {
+    setTimeout(() => {
+      const { isHost } = getNetworkState();
+      if (isHost) {
+        const { room } = getNetworkState();
+        if (room && room.phase === 'turns') {
+          const botIdx = room.turnOrder[room.currentPos];
+          const bot = room.players[botIdx];
+          if (bot && bot.isBot) {
+            processBotTurnIfNeeded();
+          }
+        }
+      }
+    }, 800);
   }
 };
 
