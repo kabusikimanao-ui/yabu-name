@@ -323,7 +323,7 @@ function buildScoreboard(highlightIdx) {
     const el = document.createElement('div');
     el.className = 'score-chip' + (i === highlightIdx ? ' turn' : '');
     el.style.setProperty('--pc', p.color);
-    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">⚠︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' 🤖' : ''}</span>
+    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' ' : ''}</span>
       <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>`;
     sb.appendChild(el);
   });
