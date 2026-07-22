@@ -1,4 +1,5 @@
-import { getUIState, setUIState } from '../ui-render.js';
+// js/features/chat.js
+import { getUIState, setUIState } from '../ui-state.js';
 import { getCurrentLang } from '../i18n.js';
 import { escapeHtml } from '../utils.js';
 import { Net } from '../network.js';
