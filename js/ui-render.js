@@ -1,15 +1,18 @@
-import { escapeHtml, formatFlipValue, isFlipValue, PLAYER_COLORS } from './utils.js';
-import { t, getCurrentLang } from './i18n.js';
-import { loadGameState, clearGameState } from './storage.js';
+import { escapeHtml, formatFlipValue, isFlipValue, PLAYER_COLORS, generateRoomURL } from './utils.js';
+import { t, getCurrentLang, setCurrentLang, getSupportedLangs, getLangName } from './i18n.js';
+import { loadGameState, clearGameState, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted } from './storage.js';
 import { getNetworkState, setNetworkState, Net } from './network.js';
 
+// ===== 状態管理 =====
 let ui = { screen: 'title', nameInput: '', codeInput: '', customCode: '', useCustomCode: false, expansionChoice: false, joinError: null, createError: null, disconnected: false };
 let turnLocal = null;
 let alibiLocal = { round: null, shown: false, values: null };
 let chatMessages = [];
 let chatCollapsed = false;
 let labels = ['容疑者 A', '容疑者 B', '容疑者 C'];
+let tutorialStep = 0;
 
+// ===== 状態取得・設定 =====
 export function getUIState() { return { ui, turnLocal, alibiLocal, chatMessages, chatCollapsed, labels }; }
 export function setUIState(state) {
   ui = state.ui ?? ui; turnLocal = state.turnLocal ?? turnLocal;
@@ -24,6 +27,7 @@ export function ensureTurnLocal(roomView) {
   }
 }
 
+// ===== メインrender関数 =====
 export function render(stage) {
   stage.innerHTML = '';
   if (ui.disconnected) { renderDisconnected(stage); return; }
@@ -42,6 +46,7 @@ export function render(stage) {
   if (roomView.phase === 'final') { renderFinal(stage); return; }
 }
 
+// ===== 切断画面 =====
 function renderDisconnected(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'title-screen fade';
@@ -59,12 +64,14 @@ function renderDisconnected(stage) {
   };
 }
 
+// ===== タイトル画面 =====
 function renderTitle(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'title-screen fade';
   const savedGame = loadGameState();
   const hasSavedGame = savedGame && savedGame.phase !== 'final';
   const lang = getCurrentLang();
+  const settings = getSettings();
 
   wrap.innerHTML = `
     <div class="title-eyebrow">P2P ${t('onlineGame')}</div>
@@ -84,7 +91,15 @@ function renderTitle(stage) {
       <button class="btn primary" id="toCreate">${t('createRoom')}</button>
       <button class="btn" id="toJoin">${t('joinRoom')}</button>
     </div>
-    <div class="center" style="margin-top:16px;"><button class="rules-link" id="titleRulesBtn">${t('howToPlay')}</button></div>
+    <div class="center" style="margin-top:16px;">
+      <button class="rules-link" id="titleRulesBtn">${t('howToPlay')}</button>
+      ${!isTutorialCompleted() ? ` · <button class="rules-link" id="tutorialBtn">${t('tutorial')}</button>` : ''}
+      · <button class="rules-link" id="historyBtn">${t('history')}</button>
+      · <button class="rules-link" id="statsBtn">${t('stats')}</button>
+    </div>
+    <div class="center" style="margin-top:10px;">
+      <button class="btn small" id="themeToggle">${settings.darkMode ? t('lightMode') : t('darkMode')}</button>
+    </div>
   `;
   stage.appendChild(wrap);
 
@@ -95,11 +110,23 @@ function renderTitle(stage) {
   document.getElementById('toCreate').onclick = () => { ui.screen = 'create'; render(stage); };
   document.getElementById('toJoin').onclick = () => { ui.screen = 'join'; render(stage); };
   document.getElementById('titleRulesBtn').onclick = () => window.openRulesModal();
+  if (!isTutorialCompleted()) {
+    document.getElementById('tutorialBtn').onclick = () => window.openTutorialModal();
+  }
+  document.getElementById('historyBtn').onclick = () => window.openHistoryModal();
+  document.getElementById('statsBtn').onclick = () => window.openStatsModal();
+  document.getElementById('themeToggle').onclick = () => {
+    const newDark = !settings.darkMode;
+    updateSettings({ darkMode: newDark });
+    document.documentElement.setAttribute('data-theme', newDark ? 'dark' : 'light');
+    render(stage);
+  };
   
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
+// ===== 接続中画面 =====
 function renderConnecting(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'title-screen fade';
@@ -110,6 +137,7 @@ function renderConnecting(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
+// ===== 部屋作成画面 =====
 function renderCreate(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'fade';
@@ -133,7 +161,7 @@ function renderCreate(stage) {
         <button class="btn primary" id="doCreate">${t('create')}</button>
       </div>
       ${ui.createError ? `<div class="err-text center">${escapeHtml(ui.createError)}</div>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="createRulesBtn">${t('howToPlay')}</button> ・ <button class="btn small" id="back1">${t('back')}</button></div>
+      <div class="center" style="margin-top:14px;"><button class="rules-link" id="createRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="back1">${t('back')}</button></div>
     </div>
   `;
   stage.appendChild(wrap);
@@ -160,6 +188,7 @@ function renderCreate(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
+// ===== 部屋参加画面 =====
 function renderJoin(stage) {
   const wrap = document.createElement('div');
   wrap.className = 'fade';
@@ -175,7 +204,7 @@ function renderJoin(stage) {
         <button class="btn primary" id="doJoin">${t('join')}</button>
       </div>
       ${ui.joinError ? `<div class="err-text center">${escapeHtml(ui.joinError)}</div>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="joinRulesBtn">${t('howToPlay')}</button> ・ <button class="btn small" id="back2">${t('back')}</button></div>
+      <div class="center" style="margin-top:14px;"><button class="rules-link" id="joinRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="back2">${t('back')}</button></div>
     </div>
   `;
   stage.appendChild(wrap);
@@ -186,7 +215,7 @@ function renderJoin(stage) {
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
   
-  // URLコピーボタンの追加
+  // Issue #2: URLコピーボタン
   if (ui.codeInput) {
     const copyArea = document.createElement('div');
     copyArea.className = 'center';
@@ -195,20 +224,19 @@ function renderJoin(stage) {
     
     const urlBox = document.createElement('div');
     urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = `${window.location.origin}${window.location.pathname}?room=${ui.codeInput}`;
+    urlBox.textContent = generateRoomURL(ui.codeInput);
     copyArea.appendChild(urlBox);
     
     const copyBtn = document.createElement('button');
     copyBtn.className = 'btn small';
     copyBtn.textContent = 'URLをコピー';
     copyBtn.onclick = () => {
-      const url = `${window.location.origin}${window.location.pathname}?room=${ui.codeInput}`;
-      navigator.clipboard.writeText(url).then(() => {
+      navigator.clipboard.writeText(generateRoomURL(ui.codeInput)).then(() => {
         copyBtn.textContent = 'コピーしました！';
         setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
       }).catch(() => {
         const textArea = document.createElement('textarea');
-        textArea.value = url;
+        textArea.value = generateRoomURL(ui.codeInput);
         document.body.appendChild(textArea);
         textArea.select();
         document.execCommand('copy');
@@ -225,6 +253,7 @@ function renderJoin(stage) {
   if (chatPanel) chatPanel.style.display = 'none';
 }
 
+// ===== ロビー画面 =====
 function renderLobby(stage) {
   const { roomView, isHost, myPlayerIndex } = getNetworkState();
   const wrap = document.createElement('div');
@@ -240,7 +269,7 @@ function renderLobby(stage) {
         ${isHost ? `<button class="btn primary" id="startBtn" ${roomView.players.length < 2 ? 'disabled' : ''}>${t('start')}（${roomView.players.length}/${t('maxPlayers')}）</button>` : `<div class="wait-panel"><div>${t('waiting')}<span class="wait-dots"></span></div></div>`}
       </div>
       ${isHost && roomView.players.length < 2 ? `<p class="err-text center">${t('minimumPlayers')}</p>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="lobbyRulesBtn">${t('howToPlay')}</button> ・ <button class="btn small" id="leaveBtn">${t('leave')}</button></div>
+      <div class="center" style="margin-top:14px;"><button class="rules-link" id="lobbyRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="leaveBtn">${t('leave')}</button></div>
     </div>
     <div class="conn-note live">${t('directConnect')}</div>
   `;
@@ -251,7 +280,7 @@ function renderLobby(stage) {
     const row = document.createElement('div');
     row.className = 'player-row';
     row.style.borderLeftColor = p.color;
-    row.innerHTML = `<span class="dot" style="background:${p.color}"></span><span>${escapeHtml(p.name)}</span>${isHost && i === 0 ? '<span class="tag">' + t('host') + '</span>' : ''}${i === myPlayerIndex ? '<span class="tag">' + t('you') + '</span>' : ''}${p.connected === false ? '<span class="tag" style="color:var(--blood);">' + t('disconnectedTag') + '</span>' : ''}`;
+    row.innerHTML = `<span class="dot" style="background:${p.color}"></span><span>${escapeHtml(p.name)}</span>${isHost && i === 0 ? '<span class="tag">' + t('host') + '</span>' : ''}${i === myPlayerIndex ? '<span class="tag">' + t('you') + '</span>' : ''}${p.connected === false ? '<span class="tag" style="color:var(--blood);">' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? '<span class="tag">🤖</span>' : ''}`;
     pl.appendChild(row);
   });
 
@@ -259,7 +288,7 @@ function renderLobby(stage) {
   document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
   
-  // ホスト用のURLコピーボタン
+  // Issue #2: ホスト用URLコピーボタン
   if (isHost) {
     const copyArea = document.createElement('div');
     copyArea.className = 'center';
@@ -268,20 +297,19 @@ function renderLobby(stage) {
     
     const urlBox = document.createElement('div');
     urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = `${window.location.origin}${window.location.pathname}?room=${roomView.code}`;
+    urlBox.textContent = generateRoomURL(roomView.code);
     copyArea.appendChild(urlBox);
     
     const copyBtn = document.createElement('button');
     copyBtn.className = 'btn small';
     copyBtn.textContent = 'URLをコピー';
     copyBtn.onclick = () => {
-      const url = `${window.location.origin}${window.location.pathname}?room=${roomView.code}`;
-      navigator.clipboard.writeText(url).then(() => {
+      navigator.clipboard.writeText(generateRoomURL(roomView.code)).then(() => {
         copyBtn.textContent = 'コピーしました！';
         setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
       }).catch(() => {
         const textArea = document.createElement('textarea');
-        textArea.value = url;
+        textArea.value = generateRoomURL(roomView.code);
         document.body.appendChild(textArea);
         textArea.select();
         document.execCommand('copy');
@@ -298,6 +326,7 @@ function renderLobby(stage) {
   if (chatPanel) chatPanel.style.display = 'block';
 }
 
+// ===== スコアボード =====
 function buildScoreboard(highlightIdx) {
   const { roomView, myPlayerIndex } = getNetworkState();
   const sb = document.createElement('div');
@@ -306,13 +335,14 @@ function buildScoreboard(highlightIdx) {
     const el = document.createElement('div');
     el.className = 'score-chip' + (i === highlightIdx ? ' turn' : '');
     el.style.setProperty('--pc', p.color);
-    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">⚠︎' + t('disconnectedTag') + '</span>' : ''}</span>
+    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">⚠︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' 🤖' : ''}</span>
       <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>`;
     sb.appendChild(el);
   });
   return sb;
 }
 
+// ===== アリバイ確認 =====
 function renderAlibi(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
   if (alibiLocal.round !== roomView.round) { 
@@ -382,7 +412,7 @@ function renderAlibi(stage) {
   rulesBtn.className = 'rules-link';
   rulesBtn.textContent = t('howToPlay');
   rulesBtn.onclick = () => window.openRulesModal();
-  const sep = document.createTextNode(' ・ ');
+  const sep = document.createTextNode(' · ');
   const leaveBtn = document.createElement('button');
   leaveBtn.className = 'btn small';
   leaveBtn.style.opacity = '.6';
@@ -410,6 +440,7 @@ function renderAlibi(stage) {
   }
 }
 
+// ===== 証言フェーズ =====
 function renderTurns(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
   ensureTurnLocal(roomView);
@@ -447,7 +478,7 @@ function renderTurns(stage) {
   rulesBtn.className = 'rules-link';
   rulesBtn.textContent = t('howToPlay');
   rulesBtn.onclick = () => window.openRulesModal();
-  const sep = document.createTextNode(' ・ ');
+  const sep = document.createTextNode(' · ');
   const leaveBtn = document.createElement('button');
   leaveBtn.className = 'btn small';
   leaveBtn.style.opacity = '.6';
@@ -458,6 +489,7 @@ function renderTurns(stage) {
   p.appendChild(leaveBtn);
   wrap.appendChild(p);
 
+  // Issue #5: 3Dカードめくり
   const tableWrap = document.createElement('div');
   tableWrap.className = 'grove-table';
   tableWrap.innerHTML = '<div class="table-surface"></div>';
@@ -472,7 +504,6 @@ function renderTurns(stage) {
   `;
   tableWrap.appendChild(victimSpot);
   
-  // 容疑者3人（3Dめくりアニメーション版）
   for (let i = 0; i < 3; i++) {
     const spot = document.createElement('div');
     spot.className = 'suspect-spot';
@@ -483,14 +514,12 @@ function renderTurns(stage) {
     const isChosen = tl.guessChoice === i;
     const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
     
-    // 3Dカードめくり用コンテナ
     const flipContainer = document.createElement('div');
     flipContainer.className = 'card-flip-container';
     
     const flipper = document.createElement('div');
     flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
     
-    // 表面（伏せ状態）
     const front = document.createElement('div');
     front.className = 'card-front';
     front.innerHTML = `
@@ -499,7 +528,6 @@ function renderTurns(stage) {
       <div class="g-body">伏せ</div>
     `;
     
-    // 裏面（めくり状態）
     const back = document.createElement('div');
     back.className = 'card-back';
     const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
@@ -521,7 +549,6 @@ function renderTurns(stage) {
           tl.chosenTwo.delete(i);
           flipper.classList.remove('flipped');
         } else if (tl.chosenTwo.size < 2) {
-          // アニメーション再生
           flipper.classList.add('flipped');
           setTimeout(() => {
             tl.chosenTwo.add(i);
@@ -534,7 +561,6 @@ function renderTurns(stage) {
       flipContainer.style.cursor = 'pointer';
       flipContainer.onclick = () => {
         tl.guessChoice = i;
-        // 選択時にアニメーション
         flipper.classList.add('flipped');
         render(stage);
       };
@@ -657,6 +683,7 @@ function renderTurns(stage) {
   stage.appendChild(wrap);
 }
 
+// ===== 真相解明 =====
 function renderReveal(stage) {
   const { roomView, isHost } = getNetworkState();
   const culprit = roomView.culpritIndex;
@@ -718,6 +745,7 @@ function renderReveal(stage) {
   stage.appendChild(wrap);
 }
 
+// ===== 最終結果 =====
 function renderFinal(stage) {
   const { roomView, isHost } = getNetworkState();
   const minFaceDown = Math.min(...roomView.players.map(p => p.faceDown));
@@ -728,10 +756,10 @@ function renderFinal(stage) {
   
   let winnerBanner = '';
   if (winners.length > 0) {
-    const winnerNames = winners.map(w => escapeHtml(w.name)).join('・');
+    const winnerNames = winners.map(w => escapeHtml(w.name)).join('·');
     winnerBanner = `
       <div class="winner-banner">
-        <h2>🏆 ${t('winner')}</h2>
+        <h2> ${t('winner')}</h2>
         <div class="winner-name">${winnerNames}</div>
       </div>
     `;
