@@ -1,8 +1,9 @@
+// js/controllers/modal-controller.js
 import { t, getCurrentLang } from '../i18n.js';
 import { setTutorialCompleted, getMatchHistory, getAllPlayerStats } from '../storage.js';
 import { escapeHtml } from '../utils.js';
 
-// ===== Issue #13: エモート表示（モーダル系と一緒にコントローラへ） =====
+// ===== Issue #13: エモート表示 =====
 export function showEmote(emote, playerName) {
   const display = document.createElement('div');
   display.className = 'emote-display';
@@ -13,7 +14,7 @@ export function showEmote(emote, playerName) {
   setTimeout(() => {
     display.classList.add('fade-out');
     setTimeout(() => {
-      if (display.parentNode) document.body.removeChild(display);
+      if (display.parentNode) display.parentNode.removeChild(display);
     }, 500);
   }, 2500);
 }
@@ -32,7 +33,6 @@ export function openTutorialModal() {
     t('tutorialStep4')
   ];
 
-  // Append overlay first so querySelector can find elements inside it reliably
   document.body.appendChild(overlay);
 
   const renderStep = (stepIdx) => {
@@ -48,7 +48,6 @@ export function openTutorialModal() {
       </div>
     `;
 
-    // Use overlay.querySelector to scope lookups to the modal content
     const prev = overlay.querySelector('#tutPrev');
     const next = overlay.querySelector('#tutNext');
     const finish = overlay.querySelector('#tutFinish');
@@ -65,7 +64,6 @@ export function openTutorialModal() {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     };
 
-    // Accessibility: focus the first actionable button
     const firstButton = prev || next || finish || skip;
     if (firstButton) firstButton.focus();
   };
@@ -109,9 +107,10 @@ export function openHistoryModal() {
 
   document.body.appendChild(overlay);
   const closeBtn = overlay.querySelector('#closeHistory');
-  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
-  // focus for accessibility
-  if (closeBtn) closeBtn.focus();
+  if (closeBtn) {
+    closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+    closeBtn.focus();
+  }
 }
 
 // ===== Issue #10: 統計 =====
@@ -157,8 +156,10 @@ export function openStatsModal() {
 
   document.body.appendChild(overlay);
   const closeBtn = overlay.querySelector('#closeStats');
-  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
-  if (closeBtn) closeBtn.focus();
+  if (closeBtn) {
+    closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+    closeBtn.focus();
+  }
 }
 
 // ===== ルールモーダル =====
@@ -178,8 +179,8 @@ export function openRulesModal() {
       <p>${lang === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
       <h4>${lang === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
       <ul>
-        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
-        <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
+        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : "Touch suspect cards to peek at 2 people's numbers. Finally, place your chip on the suspect you believe is the culprit."}</li>
+        <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : "Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2."}</li>
       </ul>
       <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
       <ul>
@@ -200,6 +201,8 @@ export function openRulesModal() {
 
   document.body.appendChild(overlay);
   const closeBtn = overlay.querySelector('#closeRules');
-  if (closeBtn) closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
-  if (closeBtn) closeBtn.focus();
+  if (closeBtn) {
+    closeBtn.onclick = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+    closeBtn.focus();
+  }
 }
