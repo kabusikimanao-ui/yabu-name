@@ -1,6 +1,7 @@
 import { escapeHtml, generateRoomURL } from '../utils.js';
 import { t, getCurrentLang } from '../i18n.js';
 import { loadGameState, clearGameState, getSettings, updateSettings, isTutorialCompleted } from '../storage.js';
+import { getNetworkState } from '../network.js';
 import { getUIState, setUIState, render } from '../ui-render.js';
 
 // ===== 切断画面 =====
@@ -11,7 +12,7 @@ export function renderDisconnected(stage) {
   wrap.innerHTML = `<div class="seal">${t('disconnectedSeal')}</div><p class="title-sub">${t('disconnected')}<br>${t('reconnect')}</p><button class="btn primary" id="backAfterDisconnect">${t('reconnect')}</button>`;
   stage.appendChild(wrap);
   document.getElementById('backAfterDisconnect').onclick = () => {
-    const { roomView } = await import('../network.js').then(m => m.getNetworkState());
+    const { roomView } = getNetworkState();
     const savedCode = roomView ? roomView.code : '';
     setUIState({ ui: { ...ui, screen: 'join', codeInput: savedCode, disconnected: false } });
     render(stage);
