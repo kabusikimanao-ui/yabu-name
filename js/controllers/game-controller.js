@@ -1,9 +1,11 @@
+// js/controllers/game-controller.js
 import { genCode } from '../utils.js';
 import { t, getCurrentLang } from '../i18n.js';
 import { getOrCreateToken, clearGameState } from '../storage.js';
 import { buildRoundState, actJoin, redact, advanceRound } from '../game-core.js';
 import { getNetworkState, setNetworkState, hostBroadcast, hostHandleRequest, sendToHost, clientHandleMessage, startHeartbeat } from '../network.js';
-import { getUIState, setUIState, render } from '../ui-render.js';
+import { getUIState, setUIState } from '../ui-state.js';
+import { render } from '../ui-render.js';
 
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
 const stage = document.getElementById('stage');
