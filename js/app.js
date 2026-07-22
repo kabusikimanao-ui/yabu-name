@@ -1,8 +1,8 @@
 import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
-import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
-import { getOrCreateToken, clearGameState, getMatchHistory, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
-import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
-import { getNetworkState, setNetworkState, hostBroadcast, hostHandleRequest, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded } from './network.js';
+import { t, getCurrentLang, setCurrentLang, triggerLangChange, getSupportedLangs, getLangName } from './i18n.js';
+import { saveGameState, loadGameState, clearGameState, getOrCreateToken, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
+import { buildRoundState, resolveChipsInto, actJoin, redact, finalizeGame, advanceRound, addBot } from './game-core.js';
+import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded } from './network.js';
 import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
 
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
@@ -161,15 +161,8 @@ window.hostStartGame = function() {
 // ===== ラウンド進行 =====
 window.hostAdvanceAfterReveal = function() {
   const { room } = getNetworkState();
-  const anyOver = room.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
-  if (anyOver) { 
-    room.phase = 'final'; 
-  } else {
-    room.round += 1;
-    room.startIdx = (room.startIdx + 1) % room.players.length;
-    buildRoundState(room);
-  }
-  hostBroadcast();
+  const result = advanceRound(room);
+  if (result.changed) hostBroadcast();
 };
 
 // ===== もう一度 =====
@@ -284,7 +277,7 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
   
-  // 【完全修正】 "= >" を "=>" に修正しました
+  // 【修正点】 "= >" を "=>" に修正しました
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box">
@@ -425,7 +418,7 @@ window.openRulesModal = function() {
         <li>${lang === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
         <li>${lang === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
       </ul>
-      <h4>${lang === 'ja' ? ' チップの精算' : '④ Chip Settlement'}</h4>
+      <h4>${lang === 'ja' ? '④ チップの精算' : '④ Chip Settlement'}</h4>
       <ul>
         <li>${lang === 'ja' ? '真犯人にチップを置いていた人は、チップが無事に戻ってくる。' : 'Players who placed chips on the true culprit get their chips back safely.'}</li>
         <li>${lang === 'ja' ? '外れた容疑者にチップを置いていた人たちは、全員「手持ち」を1枚失う。さらに、その山に最後にチップを置いた人が、山にあったチップ全部を「失敗チップ」としてまとめて引き取る。' : 'Players who placed chips on wrong suspects each lose 1 "hand" chip. Furthermore, the person who placed the last chip on that pile takes all chips from that pile as "failure chips".'}</li>
