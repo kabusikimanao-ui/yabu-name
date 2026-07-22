@@ -3,8 +3,8 @@ import { escapeHtml, formatFlipValue, isFlipValue } from '../utils.js';
 import { t, getCurrentLang } from '../i18n.js';
 import { getNetworkState, Net } from '../network.js';
 import { getUIState, setUIState, ensureTurnLocal } from '../ui-state.js';
-import { render } from '../ui-render.js';
-import { buildScoreboard } from './lobby-view.js';
+import { render, buildGroveTable } from '../ui-render.js';
+import { buildScoreboard, buildSeatTable } from './lobby-view.js';
 
 export function renderAlibi(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
@@ -20,52 +20,38 @@ export function renderAlibi(stage) {
 
   const wrap = document.createElement('div');
   wrap.className = 'fade';
-  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('alibi')}</span><span>${t('confirmedCount')} ${roomView.alibiAcked.filter(Boolean).length} / ${n}</span></div>`;
+  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('alibi')}</span><span>${getCurrentLang() === 'ja' ? '確認済み' : 'Confirmed'} ${roomView.alibiAcked.filter(Boolean).length} / ${n}</span></div>`;
 
   const card = document.createElement('div');
   card.className = 'card';
-  
   if (acked) {
-    card.innerHTML = `<h2>${t('alibiComplete')}</h2><p>${t('waitingOthers')}</p>`;
+    card.innerHTML = `<h2>${getCurrentLang() === 'ja' ? 'アリバイ確認 — 完了' : 'Alibi Check — Complete'}</h2><p>${getCurrentLang() === 'ja' ? '他のプレイヤーの確認が終わるのを待っています…' : 'Waiting for other players to finish checking…'}</p>`;
   } else if (!alibiLocal.shown) {
-    card.innerHTML = `<h2>${t('alibi')}</h2><p>${t('alibiDesc')} <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiDesc2')}</p>`;
+    card.innerHTML = `<h2>${getCurrentLang() === 'ja' ? 'アリバイ確認' : 'Alibi Check'}</h2><p>${getCurrentLang() === 'ja' ? `この事件とは無関係な人物のタイルが、あなたと隣に座る <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> にそれぞれ配られている。両方を確かめよう。容疑者の数字を推理する除外情報になる。` : `Tiles of "people unrelated to this case" are dealt to you and <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> sitting next to you. Check both. This becomes exclusion information for deducing suspect numbers.`}</p>`;
   } else {
-    const myValue = alibiLocal.values.mine;
-    const neighborValue = alibiLocal.values.neighbor;
-    const myFlipClass = isFlipValue(myValue) ? ' is-flip' : '';
-    const neighborFlipClass = isFlipValue(neighborValue) ? ' is-flip' : '';
-    
-    card.innerHTML = `
-      <h2>${t('alibi')}</h2>
-      <p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>
-      <div style="display:flex; gap:20px; justify-content:center; margin:20px 0;">
-        <div style="text-align:center;">
-          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${t('you')}</div>
-          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div class="head${myFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(myValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(myValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(myValue)}</div>
-            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
-          </div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${escapeHtml(roomView.players[neighbor].name)}</div>
-          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div class="head${neighborFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(neighborValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(neighborValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(neighborValue)}</div>
-            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
-          </div>
-        </div>
-      </div>
-      <p style="font-size:12px; color:var(--ink-soft);">${t('waitingAlibi')}</p>
-    `;
+    card.innerHTML = `<h2>${getCurrentLang() === 'ja' ? 'アリバイ確認' : 'Alibi Check'}</h2><p>${getCurrentLang() === 'ja' ? `<strong>${escapeHtml(roomView.players[neighbor].name)}</strong> の手元がめくれた。これで2人分の「無関係な人物」が分かった——場の4体の中には含まれない数字だ。` : `<strong>${escapeHtml(roomView.players[neighbor].name)}</strong>'s tiles revealed. Now you know 2 "unrelated people" — numbers not among the 4 at the scene.`}</p>`;
   }
   wrap.appendChild(card);
+
+  const cardFor = {};
+  if (!acked) {
+    cardFor[myPlayerIndex] = alibiLocal.shown ? alibiLocal.values.mine : null;
+    cardFor[neighbor] = alibiLocal.shown ? alibiLocal.values.neighbor : null;
+  }
+  wrap.appendChild(buildSeatTable({
+    highlightSet: acked ? new Set() : new Set([myPlayerIndex, neighbor]),
+    dim: !acked,
+    cardFor: acked ? null : cardFor,
+    linkLabel: !acked ? (getCurrentLang() === 'ja' ? '隣のアリバイ' : 'Neighbor\'s Alibi') : ''
+  }));
 
   const actionArea = document.createElement('div');
   actionArea.className = 'center';
   if (!acked) {
     if (!alibiLocal.shown) {
-      actionArea.innerHTML = `<button class="btn" id="viewAlibi">${t('checkTiles')}</button>`;
+      actionArea.innerHTML = `<button class="btn" id="viewAlibi">${getCurrentLang() === 'ja' ? '手元の人物を確認する' : 'Check Your Tiles'}</button>`;
     } else {
-      actionArea.innerHTML = `<button class="btn primary" id="closeAlibi">${t('hideNext')}</button>`;
+      actionArea.innerHTML = `<button class="btn primary" id="closeAlibi">${getCurrentLang() === 'ja' ? '伏せて次へ' : 'Hide & Next'}</button>`;
     }
   }
   wrap.appendChild(actionArea);
@@ -111,28 +97,22 @@ export function renderTurns(stage) {
   ensureTurnLocal(roomView);
   const curIdx = roomView.turnOrder[roomView.currentPos];
   const isMyTurn = curIdx === myPlayerIndex;
-  const { turnLocal, alibiLocal, labels } = getUIState();
+  const { turnLocal, alibiLocal } = getUIState();
   const tl = turnLocal;
 
   const wrap = document.createElement('div');
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
+  wrap.appendChild(buildSeatTable({ mini: true, highlightSet: new Set([curIdx]), dim: true }));
   wrap.appendChild(buildScoreboard(curIdx));
   
-  if (alibiLocal.shown && alibiLocal.values) {
+  if (alibiLocal.shown) {
+    // 簡易的なマイカードパネル表示
     const myAlibiPanel = document.createElement('div');
     myAlibiPanel.className = 'my-cards-panel';
-    myAlibiPanel.innerHTML = `<h3>${t('confirmedPeople')}</h3><div class="cards-display">
-      <div class="mini-card">
-        <div class="mini-head${isFlipValue(alibiLocal.values.mine) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.mine)}</div>
-        <div class="mini-body">${t('person')}</div>
-        <div class="mini-label">${t('you')}</div>
-      </div>
-      <div class="mini-card">
-        <div class="mini-head${isFlipValue(alibiLocal.values.neighbor) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.neighbor)}</div>
-        <div class="mini-body">${t('person')}</div>
-        <div class="mini-label">${escapeHtml(roomView.players[(myPlayerIndex + 1) % roomView.players.length].name)}</div>
-      </div>
+    myAlibiPanel.innerHTML = `<h3>${getCurrentLang() === 'ja' ? '確認済みの人物（ターン中ずっと表示）' : 'Confirmed People (Displayed Throughout Turn)'}</h3><div class="cards-display">
+      <div class="mini-card"><div class="mini-head${isFlipValue(alibiLocal.values.mine) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.mine)}</div><div class="mini-body">${getCurrentLang() === 'ja' ? '人' : 'P'}</div><div class="mini-label">${getCurrentLang() === 'ja' ? 'あなた' : 'You'}</div></div>
+      <div class="mini-card"><div class="mini-head${isFlipValue(alibiLocal.values.neighbor) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.neighbor)}</div><div class="mini-body">${getCurrentLang() === 'ja' ? '人' : 'P'}</div><div class="mini-label">${escapeHtml(roomView.players[(myPlayerIndex + 1) % roomView.players.length].name)}</div></div>
     </div>`;
     wrap.appendChild(myAlibiPanel);
   }
@@ -155,110 +135,34 @@ export function renderTurns(stage) {
   p.appendChild(leaveBtn);
   wrap.appendChild(p);
 
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'grove-table';
-  tableWrap.innerHTML = '<div class="table-surface"></div>';
-  
-  const victimSpot = document.createElement('div');
-  victimSpot.className = 'victim-spot';
-  victimSpot.innerHTML = `
-    <div class="victim-tile">
-      <div class="v-kanji">${t('victimKanji')}</div>
-      <div style="font-size:8px;letter-spacing:.1em;">${t('hidden')}</div>
-    </div>
-  `;
-  tableWrap.appendChild(victimSpot);
-  
-  for (let i = 0; i < 3; i++) {
-    const spot = document.createElement('div');
-    spot.className = 'suspect-spot';
-    spot.setAttribute('data-idx', i);
-    
-    const peekedValue = tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
-    const isPeeked = peekedValue !== null;
-    const isChosen = tl.guessChoice === i;
-    const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
-    
-    const flipContainer = document.createElement('div');
-    flipContainer.className = 'card-flip-container';
-    
-    const flipper = document.createElement('div');
-    flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
-    
-    const front = document.createElement('div');
-    front.className = 'card-front';
-    front.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head">？</div>
-      <div class="g-body">伏せ</div>
-    `;
-    
-    const back = document.createElement('div');
-    back.className = 'card-back';
-    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
-    back.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head${headClass}">${isPeeked ? formatFlipValue(peekedValue) : ''}</div>
-      <div class="g-body">${isPeeked ? t('confirmed') : '？'}</div>
-    `;
-    
-    flipper.appendChild(front);
-    flipper.appendChild(back);
-    flipContainer.appendChild(flipper);
-    
-    if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        if (tl.chosenTwo.has(i)) {
-          tl.chosenTwo.delete(i);
-          flipper.classList.remove('flipped');
-        } else if (tl.chosenTwo.size < 2) {
-          flipper.classList.add('flipped');
-          setTimeout(() => {
-            tl.chosenTwo.add(i);
-            render(stage);
-          }, 300);
-        }
-      };
-    } else if (isMyTurn && tl.evidenceSeen) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        tl.guessChoice = i;
-        flipper.classList.add('flipped');
-        render(stage);
-      };
+  let clickableMode = null;
+  if (isMyTurn) {
+    if (!tl.evidenceSeen && roomView.currentPos === 0) {
+      clickableMode = 'peek-select';
+    } else if (tl.evidenceSeen) {
+      clickableMode = 'guess';
     }
-    
-    spot.appendChild(flipContainer);
-    tableWrap.appendChild(spot);
   }
-  wrap.appendChild(tableWrap);
+  wrap.appendChild(buildGroveTable({ clickable: clickableMode }));
 
   if (!isMyTurn) {
     const wp = document.createElement('div');
     wp.className = 'wait-panel';
-    wp.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('currentTurn')}</p><div class="who" style="color:${roomView.players[curIdx].color}">${escapeHtml(roomView.players[curIdx].name)}</div><p style="font-size:12.5px;color:var(--ink-soft);">${t('listeningTestimony')}<span class="wait-dots"></span></p>`;
+    wp.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? '今の手番' : 'Current Turn'}</p><div class="who" style="color:${roomView.players[curIdx].color}">${escapeHtml(roomView.players[curIdx].name)}</div><p style="font-size:12.5px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? '証言を聞いています' : 'Listening to testimony'}<span class="wait-dots"></span></p>`;
     wrap.appendChild(wp);
     stage.appendChild(wrap);
     return;
   }
 
+  const isStart = roomView.currentPos === 0;
   const actionArea = document.createElement('div');
   actionArea.className = 'center';
   actionArea.style.marginTop = '18px';
 
   if (!tl.evidenceSeen) {
-    if (roomView.currentPos === 0) {
+    if (isStart) {
       const remaining = 2 - (tl.chosenTwo ? tl.chosenTwo.size : 0);
-      actionArea.innerHTML = `
-        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
-          ${t('firstDetective')} ${t('tapSuspect')}${t('checkNumbers')}<br>
-          <span style="color:var(--blood); font-weight:600;">${remaining} ${t('remainingSelect')}</span>
-        </p>
-        ${(tl.chosenTwo && tl.chosenTwo.size === 2) ? `<button class="btn primary" id="confirmPeek">${t('confirm')}</button>` : ''}
-      `;
+      actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${getCurrentLang() === 'ja' ? `あなたは第一発見者。<b>円卓上の容疑者カードをタッチして</b>、好きな2人の数字を確かめよ。<br><span style="color:var(--blood); font-weight:600;">残り ${remaining} 人選択可能</span>` : `You are the first detective. <b>Touch suspect cards on the table</b> to check 2 people's numbers.<br><span style="color:var(--blood); font-weight:600;">${remaining} more can be selected</span>`}</p>${(tl.chosenTwo && tl.chosenTwo.size === 2) ? `<button class="btn primary" id="confirmPeek">${t('confirm')}</button>` : ''}`;
       wrap.appendChild(actionArea);
       stage.appendChild(wrap);
       
@@ -269,17 +173,13 @@ export function renderTurns(stage) {
           if (error) return;
           tl.peekedValues = result.values;
           tl.evidenceSeen = true;
+          setUIState({ turnLocal: tl });
           render(stage);
         };
       }
       return;
     } else {
-      actionArea.innerHTML = `
-        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
-          ${t('exceptPrevious')} ${t('touchRemaining')}
-        </p>
-        <button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>
-      `;
+      actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${getCurrentLang() === 'ja' ? '前の人が犯人だと示した場所以外、残り2人の<b>容疑者カードをタッチして</b>数字を確認せよ。' : 'Except where the previous player indicated as culprit, <b>touch the remaining 2 suspect cards</b> to check numbers.'}</p><button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>`;
       wrap.appendChild(actionArea);
       stage.appendChild(wrap);
       const ve = document.getElementById('viewEvidence');
@@ -289,6 +189,7 @@ export function renderTurns(stage) {
           if (error) return;
           tl.peekedValues = result.values;
           tl.evidenceSeen = true;
+          setUIState({ turnLocal: tl });
           render(stage);
         };
       }
@@ -296,13 +197,13 @@ export function renderTurns(stage) {
     }
   }
 
-  if (roomView.currentPos === 0 && roomView.expansionEnabled && !tl.swapDecided) {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${t('expansionDesc')}</p>
-      <div class="row" style="justify-content:center;" id="swapButtons"></div>`;
+  if (isStart && roomView.expansionEnabled && !tl.swapDecided) {
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${getCurrentLang() === 'ja' ? '拡張ルール：望むなら、容疑者1人と被害者のタイルを入れ替えられる（数字は公開されない）。' : 'Expansion Rule: If desired, you can swap 1 suspect tile with the victim tile (number not revealed).'}</p><div class="row" style="justify-content:center;" id="swapButtons"></div>`;
     wrap.appendChild(actionArea);
     stage.appendChild(wrap);
     const sb = document.getElementById('swapButtons');
     if (sb) {
+      const { labels } = getUIState();
       for (let i = 0; i < 3; i++) {
         const b = document.createElement('button');
         b.className = 'btn small';
@@ -311,6 +212,7 @@ export function renderTurns(stage) {
           const { error } = await Net.swap(i); 
           if (error) return; 
           tl.swapDecided = true; 
+          setUIState({ turnLocal: tl });
           render(stage); 
         };
         sb.appendChild(b);
@@ -322,6 +224,7 @@ export function renderTurns(stage) {
         const { error } = await Net.swap('skip'); 
         if (error) return; 
         tl.swapDecided = true; 
+        setUIState({ turnLocal: tl });
         render(stage); 
       };
       sb.appendChild(skip);
@@ -330,9 +233,10 @@ export function renderTurns(stage) {
   }
 
   if (tl.guessChoice === null || tl.guessChoice === undefined) {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('tapCulprit')}</p>`;
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? '誰が犯人だと思うか、円卓上の容疑者をタップしてチップを置け。<b>選択すると光って強調されます</b>。別の容疑者を選ぶ場合は、再度タップしてください。' : 'Tap a suspect on the table to place your chip on who you think is the culprit. <b>Selection will glow for emphasis</b>. Tap another suspect to change your choice.'}</p>`;
   } else {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);margin-bottom:12px;">${t('currentlySelected')} <strong style="color:var(--blood);">${labels[tl.guessChoice]}</strong> ${t('selected')}</p>`;
+    const { labels } = getUIState();
+    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);margin-bottom:12px;">${getCurrentLang() === 'ja' ? `現在 <strong style="color:var(--blood);">${labels[tl.guessChoice]}</strong> を選択中。別の容疑者を選ぶ場合は円卓上のカードを再度タップしてください。` : `Currently selected: <strong style="color:var(--blood);">${labels[tl.guessChoice]}</strong>. Tap another suspect to change your choice.`}</p>`;
     const b = document.createElement('button');
     b.className = 'btn primary';
     b.textContent = (roomView.currentPos === roomView.players.length - 1) ? t('finalTruth') : t('next');
@@ -355,27 +259,15 @@ export function renderReveal(stage) {
   const s = roomView.center.suspects;
   const hasFive = s.includes(5);
   let explain;
-  if (culprit === null || culprit === undefined) { explain = t('impossible'); }
-  else if (hasFive) { explain = `${t('hasFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
-  else { explain = `${t('noFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
+  if (culprit === null || culprit === undefined) { explain = getCurrentLang() === 'ja' ? 'ありえない組み合わせだった。' : 'Impossible combination.'; }
+  else if (hasFive) { explain = getCurrentLang() === 'ja' ? `容疑者の中に「↓5↑」が含まれているため、最も小さい数字を持つ ${labels[culprit]} が真犯人だった。` : `${labels[culprit]} with the smallest number is the true culprit because "↓5↑" is among the suspects.`; }
+  else { explain = getCurrentLang() === 'ja' ? `最も大きい数字を持つ ${labels[culprit]} が真犯人だった。` : `${labels[culprit]} with the largest number is the true culprit.`; }
 
   const wrap = document.createElement('div');
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('reveal')}</span></div>`;
 
-  const suspectsRow = document.createElement('div');
-  suspectsRow.className = 'suspects-row';
-  for (let i = 0; i < 3; i++) {
-    const card = document.createElement('div');
-    card.className = 'suspect-card' + (i === culprit ? ' culprit' : '');
-    card.innerHTML = `
-      <div class="s-label">${labels[i]}</div>
-      <div class="head ${isFlipValue(s[i]) ? 'is-flip' : ''}">${formatFlipValue(s[i])}</div>
-      <div class="body">${t('person')}</div>
-    `;
-    suspectsRow.appendChild(card);
-  }
-  wrap.appendChild(suspectsRow);
+  wrap.appendChild(buildGroveTable({ showValues: true }));
 
   const explainBox = document.createElement('div');
   explainBox.className = 'reveal-explain';
@@ -400,11 +292,11 @@ export function renderReveal(stage) {
   if (isHost) {
     const b = document.createElement('button');
     b.className = 'btn primary';
-    b.textContent = anyOver ? t('viewFinal') : t('nextRound');
+    b.textContent = anyOver ? (getCurrentLang() === 'ja' ? '最終結果を見る' : 'View Final Results') : (getCurrentLang() === 'ja' ? '次のラウンドへ' : 'Next Round');
     b.onclick = () => window.hostAdvanceAfterReveal();
     btnArea.appendChild(b);
   } else {
-    btnArea.innerHTML = `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHost')}<span class="wait-dots"></span></p>`;
+    btnArea.innerHTML = `<p style="font-size:12.5px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? 'ホストが次に進めるのを待っています' : 'Waiting for host to proceed'}<span class="wait-dots"></span></p>`;
   }
   wrap.appendChild(btnArea);
   stage.appendChild(wrap);
@@ -421,30 +313,10 @@ export function renderFinal(stage) {
   let winnerBanner = '';
   if (winners.length > 0) {
     const winnerNames = winners.map(w => escapeHtml(w.name)).join('·');
-    winnerBanner = `
-      <div class="winner-banner">
-        <h2>🏆 ${t('winner')}</h2>
-        <div class="winner-name">${winnerNames}</div>
-      </div>
-    `;
+    winnerBanner = `<div class="winner-banner"><h2>🏆 ${t('winner')}</h2><div class="winner-name">${winnerNames}</div></div>`;
   }
   
-  wrap.innerHTML = `
-    <div class="card"><h2>${t('gameEnd')}</h2><p>${roomView.round} ${t('allRoundsEnd')}</p></div>
-    ${winnerBanner}
-    <div class="card">
-      <h2>${getCurrentLang() === 'ja' ? '最終成績' : 'Final Results'}</h2>
-      ${roomView.players.slice().sort((a, b) => a.faceDown - b.faceDown).map(p => `
-        <div class="score-chip" style="width:100%;margin-bottom:8px;border-left:4px solid ${p.color};">
-          <span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${winners.includes(p) ? ' ★' + t('winner') : ''}</span>
-          <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>
-        </div>`).join('')}
-    </div>
-    <div class="center" style="margin-top:24px;">
-      ${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHostFinal')}</p>`}
-      <button class="btn" id="leaveFinal" style="margin-left:10px;">${t('leave')}</button>
-    </div>
-  `;
+  wrap.innerHTML = `<div class="card"><h2>${t('gameEnd')}</h2><p>${getCurrentLang() === 'ja' ? `全 ${roomView.round} ラウンドを終え、事件簿は閉じられた。` : `All ${roomView.round} rounds completed. The case is closed.`}</p></div>${winnerBanner}<div class="card"><h2>${getCurrentLang() === 'ja' ? '最終成績' : 'Final Results'}</h2>${roomView.players.slice().sort((a, b) => a.faceDown - b.faceDown).map(p => `<div class="score-chip" style="width:100%;margin-bottom:8px;border-left:4px solid ${p.color};"><span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${winners.includes(p) ? ' ★' + t('winner') : ''}</span><span class="sc-nums"><span>${getCurrentLang() === 'ja' ? '手持ち' : 'Hand'} ${p.faceUp}</span><span>${getCurrentLang() === 'ja' ? '失敗' : 'Fail'} ${p.faceDown}</span></span></div>`).join('')}</div><div class="center" style="margin-top:24px;">${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var(--ink-soft);">${getCurrentLang() === 'ja' ? 'ホストの操作を待っています…' : 'Waiting for host…'}</p>`}<button class="btn" id="leaveFinal" style="margin-left:10px;">${t('leave')}</button></div>`;
   stage.appendChild(wrap);
   
   const pa = document.getElementById('playAgain');
