@@ -26,7 +26,3 @@ export function ensureTurnLocal(roomView) {
     turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
   }
 }
-
-export function setLabels(newLabels) {
-  labels = newLabels;
-}
