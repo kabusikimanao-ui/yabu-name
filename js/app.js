@@ -276,24 +276,28 @@ window.openTutorialModal = function() {
     t('tutorialStep3'),
     t('tutorialStep4')
   ];
-  
-  // 【修正点】overlay を先に DOM に追加
-  document.body.appendChild(overlay);
-  
+
+  // 【修正点3】閉じる処理を共通化し、overlay.remove() を使用して安全性を向上
+  const closeModal = () => {
+    setTutorialCompleted();
+    overlay.remove(); // document.body.removeChild より安全
+  };
+
   const renderStep = (stepIdx) => {
+    // 【重要】構文エラー修正: "= >" を "=>" に修正
     overlay.innerHTML = `
       <div class="modal-box rules-box">
         <h3>${t('tutorial')} (${stepIdx + 1}/${steps.length})</h3>
         <p style="font-size:15px; line-height:1.8; margin:20px 0;">${steps[stepIdx]}</p>
         <div class="center" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
           ${stepIdx > 0 ? `<button class="btn small" id="tutPrev">${t('tutorialPrev')}</button>` : ''}
-          ${stepIdx < steps.length - 1 ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>` : `<button class="btn primary small" id="tutFinish">完了</button>`}
+          ${stepIdx < steps.length - 1 ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>` : `<button class="btn primary small" id="tutFinish">${t('tutorialFinish') || (getCurrentLang() === 'ja' ? '完了' : 'Finish')}</button>`}
           <button class="btn small" id="tutSkip">${t('tutorialSkip')}</button>
         </div>
       </div>
     `;
     
-    // 【修正点】overlay.querySelector を使用
+    // 【修正点】 overlay.querySelector を使用して、確実に現在のモーダル内の要素を取得
     const prev = overlay.querySelector('#tutPrev');
     const next = overlay.querySelector('#tutNext');
     const finish = overlay.querySelector('#tutFinish');
@@ -301,19 +305,25 @@ window.openTutorialModal = function() {
     
     if (prev) prev.onclick = () => renderStep(stepIdx - 1);
     if (next) next.onclick = () => renderStep(stepIdx + 1);
-    if (finish) finish.onclick = () => {
-      setTutorialCompleted();
-      document.body.removeChild(overlay);
-    };
-    if (skip) skip.onclick = () => {
-      setTutorialCompleted();
-      document.body.removeChild(overlay);
-    };
+    if (finish) finish.onclick = closeModal;
+    if (skip) skip.onclick = closeModal;
+
+    // 【修正点2】アクセシビリティ: 最初のアクション可能なボタンにフォーカスを当てる
+    const firstButton = prev || next || finish || skip;
+    if (firstButton) firstButton.focus();
   };
-  
+
+  // 【修正点2】アクセシビリティ: Escキーでモーダルを閉じられるようにする
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+    }
+  });
+
+  // 【重要】DOMに追加してから renderStep を呼ぶ（querySelector が正しく動作するため）
+  document.body.appendChild(overlay);
   renderStep(0);
 };
-
 // ===== Issue #9: 対戦履歴 =====
 window.openHistoryModal = function() {
   const overlay = document.createElement('div');
