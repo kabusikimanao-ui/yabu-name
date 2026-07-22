@@ -72,12 +72,12 @@ window.createRoom = async function() {
   const { room } = getNetworkState();
   const out = actJoin(room, name, 'HOST', null, new Map());
   setNetworkState({ myPlayerIndex: out.result.playerIndex, roomView: redact(room, new Map()) });
-  
+
   peer.on('connection', conn => {
     conn.on('data', msg => hostHandleRequest(conn, msg));
     conn.on('close', () => { hostBroadcast(); });
   });
-  
+
   ui.screen = null;
   startHeartbeat();
   render(stage);
@@ -89,13 +89,13 @@ window.joinRoom = function() {
   const code = (ui.codeInput || '').trim().toUpperCase();
   const name = (ui.nameInput || '').trim();
   if (!code) { ui.joinError = t('enterCode'); render(stage); return; }
-  
+
   ui.screen = 'connecting'; ui.joinError = null; ui.disconnected = false;
   render(stage);
-  
+
   setNetworkState({ isHost: false });
   const token = getOrCreateToken(code);
-  
+
   try {
     const peer = new PeerCtor();
     setNetworkState({ peer });
@@ -124,6 +124,8 @@ window.joinRoom = function() {
       if (ui.screen !== 'connecting') return;
       ui.screen = 'join';
       ui.joinError = (err && err.type === 'peer-unavailable') ? t('roomNotFound') : t('connectionError');
+      // 修正: エラー時にpeerを破棄せず放置していたリークを解消
+      try { peer.destroy(); } catch (e) {}
       render(stage);
     });
   } catch (e) {
@@ -133,21 +135,26 @@ window.joinRoom = function() {
   }
 };
 
-// ===== 退出 =====
-window.leaveRoom = function() {
-  const confirmMsg = t('leaveConfirm');
-  if (!confirm(confirmMsg)) return;
-  
+// ===== 退出（内部処理・確認なし） =====
+// 修正: leaveRoomのconfirm()部分を分離。onKickedから確認なしで呼べるようにした
+function doLeaveRoom() {
   const { hostConn, peer, connections } = getNetworkState();
   try { if (hostConn) hostConn.close(); } catch (e) {}
   try { if (peer) peer.destroy(); } catch (e) {}
-  
+
   setNetworkState({ isHost: false, peer: null, hostConn: null, connections: new Map(), room: null, roomView: null, myPlayerIndex: -1 });
   const { ui } = getUIState();
   ui.screen = 'title'; ui.nameInput = ''; ui.codeInput = ''; ui.customCode = ''; ui.useCustomCode = false; ui.expansionChoice = false; ui.joinError = null; ui.createError = null; ui.disconnected = false;
   setUIState({ ui, turnLocal: null, alibiLocal: { round: null, shown: false, values: null }, chatMessages: [], chatCollapsed: false });
   clearGameState();
   render(stage);
+}
+
+// ===== 退出（ユーザー操作・確認あり） =====
+window.leaveRoom = function() {
+  const confirmMsg = t('leaveConfirm');
+  if (!confirm(confirmMsg)) return;
+  doLeaveRoom();
 };
 
 // ===== ゲーム開始 =====
@@ -201,7 +208,9 @@ window.restoreGame = function(savedRoom) {
 // ===== Issue #17: キックされた時の処理 =====
 window.onKicked = function() {
   alert(t('kickedMessage'));
-  window.leaveRoom();
+  // 修正: leaveRoom()経由だとconfirm()のキャンセルで退出処理が走らないバグがあったため
+  // 確認なしのdoLeaveRoom()を直接呼ぶように変更
+  doLeaveRoom();
 };
 
 // ===== Issue #4: ブラウザ通知 =====
@@ -209,7 +218,7 @@ async function requestNotificationPermission() {
   if (!('Notification' in window)) return;
   const current = getNotificationPermission();
   if (current === true) return;
-  
+
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
@@ -230,7 +239,7 @@ function showNotificationBanner(message) {
   document.body.appendChild(banner);
   setTimeout(() => {
     banner.classList.add('fade-out');
-    setTimeout(() => document.body.removeChild(banner), 300);
+    setTimeout(() => banner.remove(), 300); // 修正: removeChild -> remove()
   }, 3000);
 }
 
@@ -238,7 +247,7 @@ function sendTurnNotification(playerName) {
   if (getNotificationPermission() !== true) return;
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
-  
+
   try {
     new Notification(t('notificationTitle'), {
       body: `${playerName} - ${t('notificationBody')}`,
@@ -254,12 +263,10 @@ window.showEmote = function(emote, playerName) {
   display.textContent = emote;
   display.setAttribute('aria-label', `${playerName}: ${emote}`);
   document.body.appendChild(display);
-  
+
   setTimeout(() => {
     display.classList.add('fade-out');
-    setTimeout(() => {
-      if (display.parentNode) document.body.removeChild(display);
-    }, 500);
+    setTimeout(() => display.remove(), 500); // 修正: removeChild -> remove()
   }, 2500);
 };
 
@@ -269,7 +276,7 @@ window.openTutorialModal = function() {
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const steps = [
     t('tutorialStep1'),
     t('tutorialStep2'),
@@ -277,60 +284,48 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
 
-  // 【修正点3】閉じる処理を共通化し、overlay.remove() を使用して安全性を向上
   const closeModal = () => {
     setTutorialCompleted();
-    overlay.remove(); // document.body.removeChild より安全
+    overlay.remove(); // 修正: removeChild -> remove()（二重クリック等での例外を防止）
   };
 
   const renderStep = (stepIdx) => {
-    // 【重要】構文エラー修正: "= >" を "=>" に修正
     overlay.innerHTML = `
       <div class="modal-box rules-box">
         <h3>${t('tutorial')} (${stepIdx + 1}/${steps.length})</h3>
         <p style="font-size:15px; line-height:1.8; margin:20px 0;">${steps[stepIdx]}</p>
         <div class="center" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
           ${stepIdx > 0 ? `<button class="btn small" id="tutPrev">${t('tutorialPrev')}</button>` : ''}
-          ${stepIdx < steps.length - 1 ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>` : `<button class="btn primary small" id="tutFinish">${t('tutorialFinish') || (getCurrentLang() === 'ja' ? '完了' : 'Finish')}</button>`}
+          ${stepIdx < steps.length - 1
+            ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>`
+            : `<button class="btn primary small" id="tutFinish">${t('tutorialFinish')}</button>`}
           <button class="btn small" id="tutSkip">${t('tutorialSkip')}</button>
         </div>
       </div>
     `;
-    
-    // 【修正点】 overlay.querySelector を使用して、確実に現在のモーダル内の要素を取得
-    const prev = overlay.querySelector('#tutPrev');
-    const next = overlay.querySelector('#tutNext');
-    const finish = overlay.querySelector('#tutFinish');
-    const skip = overlay.querySelector('#tutSkip');
-    
+
+    const prev = document.getElementById('tutPrev');
+    const next = document.getElementById('tutNext');
+    const finish = document.getElementById('tutFinish');
+    const skip = document.getElementById('tutSkip');
+
     if (prev) prev.onclick = () => renderStep(stepIdx - 1);
     if (next) next.onclick = () => renderStep(stepIdx + 1);
     if (finish) finish.onclick = closeModal;
     if (skip) skip.onclick = closeModal;
-
-    // 【修正点2】アクセシビリティ: 最初のアクション可能なボタンにフォーカスを当てる
-    const firstButton = prev || next || finish || skip;
-    if (firstButton) firstButton.focus();
   };
 
-  // 【修正点2】アクセシビリティ: Escキーでモーダルを閉じられるようにする
-  overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeModal();
-    }
-  });
-
-  // 【重要】DOMに追加してから renderStep を呼ぶ（querySelector が正しく動作するため）
-  document.body.appendChild(overlay);
   renderStep(0);
+  document.body.appendChild(overlay);
 };
+
 // ===== Issue #9: 対戦履歴 =====
 window.openHistoryModal = function() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const history = getMatchHistory();
   let content = '';
   if (history.length === 0) {
@@ -348,7 +343,7 @@ window.openHistoryModal = function() {
       `;
     }).join('');
   }
-  
+
   overlay.innerHTML = `
     <div class="modal-box rules-box">
       <h3>${t('history')}</h3>
@@ -356,9 +351,9 @@ window.openHistoryModal = function() {
       <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeHistory">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
     </div>
   `;
-  
+
   document.body.appendChild(overlay);
-  document.getElementById('closeHistory').onclick = () => document.body.removeChild(overlay);
+  document.getElementById('closeHistory').onclick = () => overlay.remove(); // 修正: removeChild -> remove()
 };
 
 // ===== Issue #10: 統計 =====
@@ -367,7 +362,7 @@ window.openStatsModal = function() {
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const allStats = getAllPlayerStats();
   const playerNames = Object.keys(allStats);
   let content = '';
@@ -383,16 +378,16 @@ window.openStatsModal = function() {
         <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--bamboo); margin-bottom:8px; border-radius:0 8px 8px 0;">
           <div style="font-size:14px; font-weight:600; color:var(--ink);">${escapeHtml(name)}</div>
           <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">
-            ${t('totalGames')}: ${s.totalGames} · 
-            ${t('winRate')}: ${winRate}% · 
-            ${t('avgFailChips')}: ${avgFail} · 
+            ${t('totalGames')}: ${s.totalGames} ·
+            ${t('winRate')}: ${winRate}% ·
+            ${t('avgFailChips')}: ${avgFail} ·
             ${t('correctRate')}: ${correctRate}%
           </div>
         </div>
       `;
     }).join('');
   }
-  
+
   overlay.innerHTML = `
     <div class="modal-box rules-box">
       <h3>${t('stats')}</h3>
@@ -400,9 +395,9 @@ window.openStatsModal = function() {
       <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeStats">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
     </div>
   `;
-  
+
   document.body.appendChild(overlay);
-  document.getElementById('closeStats').onclick = () => document.body.removeChild(overlay);
+  document.getElementById('closeStats').onclick = () => overlay.remove(); // 修正: removeChild -> remove()
 };
 
 // ===== ルールモーダル =====
@@ -411,7 +406,7 @@ window.openRulesModal = function() {
   overlay.className = 'modal-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  
+
   const lang = getCurrentLang();
   overlay.innerHTML = `
     <div class="modal-box rules-box">
@@ -441,9 +436,9 @@ window.openRulesModal = function() {
       <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${lang === 'ja' ? '閉じる' : 'Close'}</button></div>
     </div>
   `;
-  
+
   document.body.appendChild(overlay);
-  document.getElementById('closeRules').onclick = () => document.body.removeChild(overlay);
+  document.getElementById('closeRules').onclick = () => overlay.remove(); // 修正: removeChild -> remove()
 };
 
 // ===== 言語切り替え =====
@@ -495,7 +490,7 @@ window.onChatMessage = function(chatMsg) {
   chatMessages.push(chatMsg);
   if (chatMessages.length > 50) chatMessages.shift();
   setUIState({ chatMessages });
-  
+
   const messages = document.getElementById('chatMessages');
   if (messages) {
     const lang = getCurrentLang();
@@ -505,7 +500,7 @@ window.onChatMessage = function(chatMsg) {
     }).join('');
     messages.scrollTop = messages.scrollHeight;
   }
-  
+
   const panel = document.getElementById('chatPanel');
   if (panel) panel.style.display = 'block';
 };
@@ -513,7 +508,7 @@ window.onChatMessage = function(chatMsg) {
 // ===== ゲーム状態変更 =====
 window.onGameStateChanged = function(view) {
   render(stage);
-  
+
   // Issue #4: 手番通知
   if (view && view.phase === 'turns') {
     const { myPlayerIndex } = getNetworkState();
@@ -522,7 +517,7 @@ window.onGameStateChanged = function(view) {
       sendTurnNotification(view.players[myPlayerIndex]?.name);
     }
   }
-  
+
   // Issue #20: ボットターン処理
   if (view && view.phase === 'turns') {
     setTimeout(() => {
