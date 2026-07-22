@@ -1,3 +1,4 @@
+// ===== 多言語定義（Issue #18対応） =====
 export const i18n = {
   ja: {
     chat: 'チャット',
@@ -127,7 +128,64 @@ export const i18n = {
     onlineGame: 'オンライン推理ゲーム',
     sealText: '検',
     disconnectedSeal: '切',
-    connectingSeal: '…'
+    connectingSeal: '…',
+    // Issue #4: ブラウザ通知
+    notificationTitle: 'あなたの手番です！',
+    notificationBody: '藪の中であなたのターンが回ってきました。',
+    notificationPermission: '通知を許可する',
+    notificationAllowed: '通知が許可されました',
+    notificationDenied: '通知が拒否されました',
+    // Issue #8: ダークモード
+    darkMode: 'ダークモード',
+    lightMode: 'ライトモード',
+    // Issue #9: 対戦履歴
+    history: '対戦履歴',
+    noHistory: '対戦履歴がありません',
+    date: '日付',
+    rounds: 'ラウンド',
+    // Issue #10: 統計
+    stats: '統計',
+    totalGames: '総プレイ数',
+    winRate: '勝率',
+    avgFailChips: '平均失敗チップ数',
+    correctRate: '正解率',
+    // Issue #11: スクリーンショット
+    saveScreenshot: '結果を保存',
+    shareResult: '結果を共有',
+    screenshotSaved: 'スクリーンショットを保存しました',
+    // Issue #12: チュートリアル
+    tutorial: 'チュートリアル',
+    tutorialSkip: 'スキップ',
+    tutorialNext: '次へ',
+    tutorialPrev: '戻る',
+    tutorialStep1: 'ようこそ！このゲームは2〜5人で遊ぶ推理ゲームです。',
+    tutorialStep2: 'まず、アリバイ確認フェーズで自分と隣のプレイヤーのタイルを確認します。',
+    tutorialStep3: '次に、証言フェーズで容疑者の数字を確認し、犯人を推理します。',
+    tutorialStep4: '最後に、全員の証言が出そろったら真相を解明します。',
+    // Issue #13: エモート
+    emotes: 'リアクション',
+    // Issue #14: PWA
+    installApp: 'アプリをインストール',
+    installPrompt: 'ホーム画面に追加してアプリのように使えます',
+    // Issue #16: 名前変更
+    changeName: '名前を変更',
+    nameChanged: '名前を変更しました',
+    // Issue #17: キック
+    kickPlayer: 'キック',
+    kickConfirm: 'このプレイヤーを部屋から追い出しますか？',
+    kickedMessage: '部屋から追い出されました',
+    // Issue #18: 言語
+    language: '言語',
+    // Issue #19: アクセシビリティ
+    accessibility: 'アクセシビリティ',
+    highContrast: '高コントラスト',
+    reduceMotion: '動きを軽減',
+    // Issue #20: ボット
+    botMode: 'ボット対戦',
+    botThinking: 'ボットが思考中…',
+    bot: 'ボット',
+    singlePlayer: '1人プレイ',
+    backToLobby: 'ロビーに戻る'
   },
   en: {
     chat: 'Chat',
@@ -257,31 +315,170 @@ export const i18n = {
     onlineGame: 'Online Deduction Game',
     sealText: 'INV',
     disconnectedSeal: '切',
-    connectingSeal: '…'
+    connectingSeal: '…',
+    notificationTitle: 'It\'s your turn!',
+    notificationBody: 'Your turn has come in In a Grove.',
+    notificationPermission: 'Allow Notifications',
+    notificationAllowed: 'Notifications allowed',
+    notificationDenied: 'Notifications denied',
+    darkMode: 'Dark Mode',
+    lightMode: 'Light Mode',
+    history: 'Match History',
+    noHistory: 'No match history',
+    date: 'Date',
+    rounds: 'Rounds',
+    stats: 'Statistics',
+    totalGames: 'Total Games',
+    winRate: 'Win Rate',
+    avgFailChips: 'Avg Fail Chips',
+    correctRate: 'Correct Rate',
+    saveScreenshot: 'Save Result',
+    shareResult: 'Share Result',
+    screenshotSaved: 'Screenshot saved',
+    tutorial: 'Tutorial',
+    tutorialSkip: 'Skip',
+    tutorialNext: 'Next',
+    tutorialPrev: 'Back',
+    tutorialStep1: 'Welcome! This is a deduction game for 2-5 players.',
+    tutorialStep2: 'First, check your and your neighbor\'s tiles in the Alibi Check phase.',
+    tutorialStep3: 'Then, check suspect numbers and deduce the culprit in the Testimony phase.',
+    tutorialStep4: 'Finally, reveal the truth when all testimonies are ready.',
+    emotes: 'Reactions',
+    installApp: 'Install App',
+    installPrompt: 'Add to home screen to use like an app',
+    changeName: 'Change Name',
+    nameChanged: 'Name changed',
+    kickPlayer: 'Kick',
+    kickConfirm: 'Kick this player from the room?',
+    kickedMessage: 'You have been kicked from the room',
+    language: 'Language',
+    accessibility: 'Accessibility',
+    highContrast: 'High Contrast',
+    reduceMotion: 'Reduce Motion',
+    botMode: 'Bot Battle',
+    botThinking: 'Bot is thinking…',
+    bot: 'Bot',
+    singlePlayer: 'Single Player',
+    backToLobby: 'Back to Lobby'
+  },
+  // Issue #18: 多言語拡充（簡易版）
+  zh: {
+    chat: '聊天',
+    send: '发送',
+    createRoom: '创建房间（房主）',
+    joinRoom: '加入房间',
+    howToPlay: '玩法说明',
+    enterName: '你的名字',
+    roomCode: '房间号',
+    winner: '胜利者',
+    leave: '离开房间',
+    start: '开始调查',
+    round: '第',
+    turn: '回合',
+    // 不足分は英語にフォールバック
+  },
+  ko: {
+    chat: '채팅',
+    send: '보내기',
+    createRoom: '방 만들기 (호스트)',
+    joinRoom: '방 참여',
+    howToPlay: '게임 방법',
+    enterName: '닉네임',
+    roomCode: '방 번호',
+    winner: '승자',
+    leave: '방 나가기',
+    start: '수사 시작',
+    round: '라운드',
+    turn: '턴',
+  },
+  es: {
+    chat: 'Chat',
+    send: 'Enviar',
+    createRoom: 'Crear Sala (Anfitrión)',
+    joinRoom: 'Unirse a Sala',
+    howToPlay: 'Cómo Jugar',
+    enterName: 'Tu Nombre',
+    roomCode: 'Código de Sala',
+    winner: 'Ganador',
+    leave: 'Salir',
+    start: 'Iniciar Investigación',
+    round: 'Ronda',
+    turn: 'Turno',
   }
 };
 
+// ===== 言語管理 =====
+const LANG_KEY = 'yabu_lang';
+const SUPPORTED_LANGS = ['ja', 'en', 'zh', 'ko', 'es'];
+
 export function getCurrentLang() {
-  return localStorage.getItem('yabu_lang') || 'ja';
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved && SUPPORTED_LANGS.includes(saved)) return saved;
+  } catch (e) {}
+  // ブラウザの言語設定から推測
+  const browserLang = navigator.language?.slice(0, 2);
+  if (browserLang && SUPPORTED_LANGS.includes(browserLang)) return browserLang;
+  return 'ja';
 }
 
 export function setCurrentLang(lang) {
-  localStorage.setItem('yabu_lang', lang);
+  if (!SUPPORTED_LANGS.includes(lang)) lang = 'ja';
+  try {
+    localStorage.setItem(LANG_KEY, lang);
+  } catch (e) {}
 }
 
+export function getSupportedLangs() {
+  return SUPPORTED_LANGS;
+}
+
+export function getLangName(lang) {
+  const names = {
+    ja: '日本語',
+    en: 'English',
+    zh: '中文',
+    ko: '한국어',
+    es: 'Español'
+  };
+  return names[lang] || lang;
+}
+
+// ===== 翻訳関数 =====
 export function t(key, lang = getCurrentLang()) {
   try {
-    const keys = key.split('.');
+    // 指定言語で検索
     let obj = i18n[lang];
-    for (const k of keys) {
-      if (obj && obj[k] !== undefined) {
-        obj = obj[k];
-      } else {
-        return key;
-      }
+    if (obj && obj[key] !== undefined) return obj[key];
+    
+    // 英語にフォールバック
+    if (lang !== 'en' && i18n.en && i18n.en[key] !== undefined) {
+      return i18n.en[key];
     }
-    return obj || key;
-  } catch(e) {
+    
+    // キーをそのまま返す
+    return key;
+  } catch (e) {
     return key;
   }
+}
+
+// ===== 複数形対応（簡易版） =====
+export function tn(key, count, lang = getCurrentLang()) {
+  const base = t(key, lang);
+  // 日本語は複数形なし
+  if (lang === 'ja') return base;
+  // 英語などは count に応じて変化（必要に応じて拡張）
+  return `${count} ${base}`;
+}
+
+// ===== 言語切り替えイベント =====
+export function onLangChange(callback) {
+  window.addEventListener('yabu-lang-change', callback);
+  return () => window.removeEventListener('yabu-lang-change', callback);
+}
+
+export function triggerLangChange(lang) {
+  setCurrentLang(lang);
+  window.dispatchEvent(new CustomEvent('yabu-lang-change', { detail: lang }));
 }
