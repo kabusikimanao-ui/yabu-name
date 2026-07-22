@@ -1,6 +1,4 @@
 // js/ui-state.js
-// UI の共有状態と ensureTurnLocal を提供する純粋な状態モジュール
-
 let ui = { screen: 'title', nameInput: '', codeInput: '', customCode: '', useCustomCode: false, expansionChoice: false, joinError: null, createError: null, disconnected: false };
 let turnLocal = null;
 let alibiLocal = { round: null, shown: false, values: null };
@@ -27,4 +25,8 @@ export function ensureTurnLocal(roomView) {
   if (!turnLocal || turnLocal.key !== key) {
     turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
   }
+}
+
+export function setLabels(newLabels) {
+  labels = newLabels;
 }
