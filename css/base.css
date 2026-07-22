@@ -7,12 +7,27 @@
   --blood:#8c2f26; --blood-soft:#a8493d; --gold:#a9813f;
   --p0:#8c2f26; --p1:#2c4a6b; --p2:#4f6b3f; --p3:#6b4f8c; --p4:#8b4513;
 }
+
+/* ダークモード用変数（Issue #8） */
+[data-theme="dark"] {
+  --ink:#e9e0c8; --ink-soft:#b8a88a;
+  --paper:#2a2520; --paper-dark:#3a332a; --paper-deep:#4a4137;
+  --bamboo:#6b8f5f; --bamboo-dark:#4f6b3f;
+  --blood:#c8493d; --blood-soft:#e06b5f; --gold:#d4a85a;
+}
+
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0; overflow-x:hidden;}
 body{
   background:linear-gradient(180deg,#f1e9d2 0%, #e6dab7 45%, #d9caa0 100%);
   color:var(--ink); font-family:'Zen Old Mincho','Shippori Mincho',serif; min-height:100vh;
+  transition:background 0.3s ease, color 0.3s ease;
 }
+
+[data-theme="dark"] body {
+  background:linear-gradient(180deg,#1a1510 0%, #2a2520 45%, #3a332a 100%);
+}
+
 .stage{ max-width:800px; margin:0 auto; padding:20px 16px 120px; min-height:100vh; }
 h1,h2,h3{ font-family:'Shippori Mincho',serif; margin:0; }
 .row{ display:flex; gap:10px; flex-wrap:wrap; }
@@ -27,6 +42,10 @@ h1,h2,h3{ font-family:'Shippori Mincho',serif; margin:0; }
 .notice-box{ font-size:12px; color:var(--ink-soft); max-width:440px; line-height:1.9; background:#f4ecd6; border:1px solid var(--paper-deep); padding:14px 18px; margin-bottom:26px; text-align:left; }
 .notice-box b{ color:var(--ink); }
 
+[data-theme="dark"] .notice-box {
+  background:#3a332a;
+}
+
 .err-text{ color:var(--blood); font-size:12.5px; margin-top:8px; }
 .conn-note{ font-size:11px; color:var(--ink-soft); text-align:center; margin-top:20px; letter-spacing:.05em;}
 .conn-note.live::before{ content:'● '; color:var(--bamboo); }
@@ -36,6 +55,41 @@ h1,h2,h3{ font-family:'Shippori Mincho',serif; margin:0; }
   z-index:60;
 }
 
+/* アクセシビリティ対応（Issue #19） */
+*:focus-visible {
+  outline: 3px solid var(--blood);
+  outline-offset: 2px;
+}
+
+button:focus-visible {
+  outline: 3px solid var(--blood);
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: 3px solid var(--blood);
+  outline-offset: 1px;
+}
+
+/* キーボードナビゲーション用 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 @media (max-width: 480px) {
   .stage{ padding:10px 12px 140px; }
+}
+
+/* プリント用スタイル */
+@media print {
+  .chat-panel, .lang-switch { display: none; }
+  body { background: #fff; color: #000; }
 }
