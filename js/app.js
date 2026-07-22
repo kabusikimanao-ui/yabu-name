@@ -1,8 +1,10 @@
+// js/app.js
 import { getURLParam } from './utils.js';
 import { getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
 import { getSettings, updateSettings, isTutorialCompleted, getNotificationPermission } from './storage.js';
 import { getNetworkState, processBotTurnIfNeeded } from './network.js';
-import { render, getUIState, setUIState } from './ui-render.js';
+import { render } from './ui-render.js';
+import { getUIState, setUIState } from './ui-state.js';
 import { createRoom, joinRoom, leaveRoom, hostStartGame, hostAdvanceAfterReveal, hostPlayAgain, restoreGame, onKicked } from './controllers/game-controller.js';
 import { openTutorialModal, openHistoryModal, openStatsModal, openRulesModal, showEmote } from './controllers/modal-controller.js';
 import { initChat, handleChatMessage } from './features/chat.js';
