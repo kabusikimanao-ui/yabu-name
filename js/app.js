@@ -1,4 +1,4 @@
-import { escapeHtml, genCode, generateRoomURL } from './utils.js';
+import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
 import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
 import { getOrCreateToken, clearGameState, getMatchHistory, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
 import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
@@ -420,12 +420,12 @@ window.openRulesModal = function() {
         <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : "Touch suspect cards to peek at 2 people's numbers. Finally, place your chip on the suspect you believe is the culprit."}</li>
         <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : "Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2."}</li>
       </ul>
-      <h4>${lang === 'ja' ? ' 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
       <ul>
         <li>${lang === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
         <li>${lang === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
       </ul>
-      <h4>${lang === 'ja' ? '④ チップの精算' : '④ Chip Settlement'}</h4>
+      <h4>${lang === 'ja' ? ' チップの精算' : '④ Chip Settlement'}</h4>
       <ul>
         <li>${lang === 'ja' ? '真犯人にチップを置いていた人は、チップが無事に戻ってくる。' : 'Players who placed chips on the true culprit get their chips back safely.'}</li>
         <li>${lang === 'ja' ? '外れた容疑者にチップを置いていた人たちは、全員「手持ち」を1枚失う。さらに、その山に最後にチップを置いた人が、山にあったチップ全部を「失敗チップ」としてまとめて引き取る。' : 'Players who placed chips on wrong suspects each lose 1 "hand" chip. Furthermore, the person who placed the last chip on that pile takes all chips from that pile as "failure chips".'}</li>
