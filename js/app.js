@@ -277,7 +277,7 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
   
-  // 【修正点】 "= >" の間のスペースを削除して "=>" にしました
+  // 【修正済み】 "= >" の間のスペースを削除して "=>" にしました
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box">
