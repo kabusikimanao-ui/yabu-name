@@ -277,7 +277,9 @@ window.openTutorialModal = function() {
     t('tutorialStep4')
   ];
   
-  // 【修正点】 "= >" を "=>" に修正しました
+  // 【修正点】overlay を先に DOM に追加
+  document.body.appendChild(overlay);
+  
   const renderStep = (stepIdx) => {
     overlay.innerHTML = `
       <div class="modal-box rules-box">
@@ -291,10 +293,11 @@ window.openTutorialModal = function() {
       </div>
     `;
     
-    const prev = document.getElementById('tutPrev');
-    const next = document.getElementById('tutNext');
-    const finish = document.getElementById('tutFinish');
-    const skip = document.getElementById('tutSkip');
+    // 【修正点】overlay.querySelector を使用
+    const prev = overlay.querySelector('#tutPrev');
+    const next = overlay.querySelector('#tutNext');
+    const finish = overlay.querySelector('#tutFinish');
+    const skip = overlay.querySelector('#tutSkip');
     
     if (prev) prev.onclick = () => renderStep(stepIdx - 1);
     if (next) next.onclick = () => renderStep(stepIdx + 1);
@@ -309,7 +312,6 @@ window.openTutorialModal = function() {
   };
   
   renderStep(0);
-  document.body.appendChild(overlay);
 };
 
 // ===== Issue #9: 対戦履歴 =====
