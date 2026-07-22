@@ -1,790 +1,568 @@
-import { escapeHtml, formatFlipValue, isFlipValue, PLAYER_COLORS, generateRoomURL } from './utils.js';
-import { t, getCurrentLang, setCurrentLang, getSupportedLangs, getLangName } from './i18n.js';
-import { loadGameState, clearGameState, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted } from './storage.js';
-import { getNetworkState, setNetworkState, Net } from './network.js';
+import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
+import { t, getCurrentLang, setCurrentLang, triggerLangChange, getSupportedLangs, getLangName } from './i18n.js';
+import { saveGameState, loadGameState, clearGameState, getOrCreateToken, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
+import { buildRoundState, resolveChipsInto, actJoin, redact, finalizeGame, advanceRound, addBot } from './game-core.js';
+import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded } from './network.js';
+import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
 
-// ===== 状態管理 =====
-let ui = { screen: 'title', nameInput: '', codeInput: '', customCode: '', useCustomCode: false, expansionChoice: false, joinError: null, createError: null, disconnected: false };
-let turnLocal = null;
-let alibiLocal = { round: null, shown: false, values: null };
-let chatMessages = [];
-let chatCollapsed = false;
-let labels = ['容疑者 A', '容疑者 B', '容疑者 C'];
-let tutorialStep = 0;
+const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
+const stage = document.getElementById('stage');
 
-// ===== 状態取得・設定 =====
-export function getUIState() { return { ui, turnLocal, alibiLocal, chatMessages, chatCollapsed, labels }; }
-export function setUIState(state) {
-  ui = state.ui ?? ui; turnLocal = state.turnLocal ?? turnLocal;
-  alibiLocal = state.alibiLocal ?? alibiLocal; chatMessages = state.chatMessages ?? chatMessages;
-  chatCollapsed = state.chatCollapsed ?? chatCollapsed; labels = state.labels ?? labels;
+// ===== Issue #2: URLパラメータの解析 =====
+const urlParams = new URLSearchParams(window.location.search);
+const roomCodeFromUrl = urlParams.get('room');
+if (roomCodeFromUrl) {
+  const { ui } = getUIState();
+  ui.codeInput = roomCodeFromUrl.toUpperCase();
+  ui.screen = 'join';
 }
 
-export function ensureTurnLocal(roomView) {
-  const key = roomView.round + '-' + roomView.currentPos + '-' + roomView.phase;
-  if (!turnLocal || turnLocal.key !== key) {
-    turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
-  }
+// ===== Issue #8: ダークモードの初期適用 =====
+const settings = getSettings();
+if (settings.darkMode) {
+  document.documentElement.setAttribute('data-theme', 'dark');
 }
 
-// ===== メインrender関数 =====
-export function render(stage) {
-  stage.innerHTML = '';
-  if (ui.disconnected) { renderDisconnected(stage); return; }
-  if (ui.screen === 'title') { renderTitle(stage); return; }
-  if (ui.screen === 'create') { renderCreate(stage); return; }
-  if (ui.screen === 'join') { renderJoin(stage); return; }
-  if (ui.screen === 'connecting') { renderConnecting(stage); return; }
-  
-  const { roomView, myPlayerIndex, isHost } = getNetworkState();
-  if (!roomView) { renderConnecting(stage); return; }
-  
-  if (roomView.phase === 'lobby') { renderLobby(stage); return; }
-  if (roomView.phase === 'alibi') { renderAlibi(stage); return; }
-  if (roomView.phase === 'turns') { renderTurns(stage); return; }
-  if (roomView.phase === 'reveal') { renderReveal(stage); return; }
-  if (roomView.phase === 'final') { renderFinal(stage); return; }
+// ===== Issue #19: アクセシビリティ設定の初期適用 =====
+if (settings.highContrast) {
+  document.documentElement.setAttribute('data-contrast', 'high');
+}
+if (settings.reduceMotion) {
+  document.documentElement.setAttribute('data-reduce-motion', 'true');
 }
 
-// ===== 切断画面 =====
-function renderDisconnected(stage) {
-  const wrap = document.createElement('div');
-  wrap.className = 'title-screen fade';
-  wrap.innerHTML = `
-    <div class="seal">${t('disconnectedSeal')}</div>
-    <p class="title-sub">${t('disconnected')}<br>${t('reconnect')}</p>
-    <button class="btn primary" id="backAfterDisconnect">${t('reconnect')}</button>
-  `;
-  stage.appendChild(wrap);
-  document.getElementById('backAfterDisconnect').onclick = () => {
-    const { roomView } = getNetworkState();
-    const savedCode = roomView ? roomView.code : '';
-    ui = { screen: 'join', nameInput: ui.nameInput, codeInput: savedCode, customCode: '', useCustomCode: false, expansionChoice: false, joinError: null, createError: null, disconnected: false };
-    render(stage);
-  };
-}
+// ===== 部屋作成 =====
+window.createRoom = async function() {
+  const { ui } = getUIState();
+  const name = (ui.nameInput || '').trim() || (getCurrentLang() === 'ja' ? '探偵1' : 'Detective1');
+  ui.screen = 'connecting'; ui.createError = null;
+  render(stage);
 
-// ===== タイトル画面 =====
-function renderTitle(stage) {
-  const wrap = document.createElement('div');
-  wrap.className = 'title-screen fade';
-  const savedGame = loadGameState();
-  const hasSavedGame = savedGame && savedGame.phase !== 'final';
-  const lang = getCurrentLang();
-  const settings = getSettings();
-
-  wrap.innerHTML = `
-    <div class="title-eyebrow">P2P ${t('onlineGame')}</div>
-    <div class="seal">${t('sealText')}</div>
-    <h1 class="title-main">${lang === 'ja' ? '藪の中' : 'In a Grove'}</h1>
-    <p class="title-sub">${t('titleDesc')}</p>
-    <div class="notice-box">${t('noticeText')}</div>
-    ${hasSavedGame ? `
-      <div class="saved-game-card">
-        <h3>${t('previousRoom')}</h3>
-        <p>${lang === 'ja' ? `部屋番号: <span class="room-code">${escapeHtml(savedGame.code)}</span><br>フェーズ: ${escapeHtml(savedGame.phase)}<br>プレイヤー: ${savedGame.players.length}${t('personCount')}` : `Code: <span class="room-code">${escapeHtml(savedGame.code)}</span><br>Phase: ${escapeHtml(savedGame.phase)}<br>Players: ${savedGame.players.length}`}</p>
-        <button class="btn primary small" id="restoreBtn">${t('restoreRoom')}</button>
-        <button class="btn small" id="clearBtn" style="margin-left:8px;">${t('clear')}</button>
-      </div>
-    ` : ''}
-    <div class="row" style="justify-content:center;">
-      <button class="btn primary" id="toCreate">${t('createRoom')}</button>
-      <button class="btn" id="toJoin">${t('joinRoom')}</button>
-    </div>
-    <div class="center" style="margin-top:16px;">
-      <button class="rules-link" id="titleRulesBtn">${t('howToPlay')}</button>
-      ${!isTutorialCompleted() ? ` · <button class="rules-link" id="tutorialBtn">${t('tutorial')}</button>` : ''}
-      · <button class="rules-link" id="historyBtn">${t('history')}</button>
-      · <button class="rules-link" id="statsBtn">${t('stats')}</button>
-    </div>
-    <div class="center" style="margin-top:10px;">
-      <button class="btn small" id="themeToggle">${settings.darkMode ? t('lightMode') : t('darkMode')}</button>
-    </div>
-  `;
-  stage.appendChild(wrap);
-
-  if (hasSavedGame) {
-    document.getElementById('restoreBtn').onclick = () => window.restoreGame(savedGame);
-    document.getElementById('clearBtn').onclick = () => { clearGameState(); render(stage); };
-  }
-  document.getElementById('toCreate').onclick = () => { ui.screen = 'create'; render(stage); };
-  document.getElementById('toJoin').onclick = () => { ui.screen = 'join'; render(stage); };
-  document.getElementById('titleRulesBtn').onclick = () => window.openRulesModal();
-  if (!isTutorialCompleted()) {
-    document.getElementById('tutorialBtn').onclick = () => window.openTutorialModal();
-  }
-  document.getElementById('historyBtn').onclick = () => window.openHistoryModal();
-  document.getElementById('statsBtn').onclick = () => window.openStatsModal();
-  document.getElementById('themeToggle').onclick = () => {
-    const newDark = !settings.darkMode;
-    updateSettings({ darkMode: newDark });
-    document.documentElement.setAttribute('data-theme', newDark ? 'dark' : 'light');
-    render(stage);
-  };
-  
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) chatPanel.style.display = 'none';
-}
-
-// ===== 接続中画面 =====
-function renderConnecting(stage) {
-  const wrap = document.createElement('div');
-  wrap.className = 'title-screen fade';
-  wrap.innerHTML = `<div class="seal">${t('connectingSeal')}</div><p class="title-sub">${t('connecting')}<span class="wait-dots"></span></p>`;
-  stage.appendChild(wrap);
-  
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) chatPanel.style.display = 'none';
-}
-
-// ===== 部屋作成画面 =====
-function renderCreate(stage) {
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `
-    <div class="card">
-      <h2>${t('createRoomTitle')}</h2>
-      <p>${t('hostDesc')}</p>
-      <label style="font-size:12px;color:var(--ink-soft);">${t('enterName')}</label>
-      <input class="form-input" id="nameInput" placeholder="${t('nameExample')}" value="${escapeHtml(ui.nameInput)}">
-      <label style="font-size:12px;color:var(--ink-soft);">${t('customRoomCode')}</label>
-      <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-        <label style="font-size:13px; display:flex; align-items:center; gap:6px; cursor:pointer;">
-          <input type="checkbox" id="useCustomCode" ${ui.useCustomCode ? 'checked' : ''} style="width:18px; height:18px;">
-          ${t('customRoomCode')}
-        </label>
-      </div>
-      ${ui.useCustomCode ? `<input class="form-input code-input" id="customCodeInput" maxlength="6" placeholder="${t('customCodeExample')}" value="${escapeHtml(ui.customCode)}" style="text-transform:uppercase;">` : ''}
-      <label style="font-size:12px;color:var(--ink-soft);">${t('expansionRule')}</label>
-      <div class="count-row" id="expRow"></div>
-      <div class="center">
-        <button class="btn primary" id="doCreate">${t('create')}</button>
-      </div>
-      ${ui.createError ? `<div class="err-text center">${escapeHtml(ui.createError)}</div>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="createRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="back1">${t('back')}</button></div>
-    </div>
-  `;
-  stage.appendChild(wrap);
-
-  document.getElementById('nameInput').oninput = e => { ui.nameInput = e.target.value; };
-  document.getElementById('useCustomCode').onchange = e => { ui.useCustomCode = e.target.checked; render(stage); };
-  const cci = document.getElementById('customCodeInput');
-  if (cci) cci.oninput = e => { ui.customCode = e.target.value.toUpperCase(); };
-
-  const expRow = document.getElementById('expRow');
-  [{ v: false, label: t('dontUse') }, { v: true, label: t('use') }].forEach(opt => {
-    const b = document.createElement('button');
-    b.className = 'count-btn' + (ui.expansionChoice === opt.v ? ' active' : '');
-    b.textContent = opt.label;
-    b.onclick = () => { ui.expansionChoice = opt.v; render(stage); };
-    expRow.appendChild(b);
-  });
-
-  document.getElementById('doCreate').onclick = () => window.createRoom();
-  document.getElementById('back1').onclick = () => { ui.screen = 'title'; render(stage); };
-  document.getElementById('createRulesBtn').onclick = () => window.openRulesModal();
-  
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) chatPanel.style.display = 'none';
-}
-
-// ===== 部屋参加画面 =====
-function renderJoin(stage) {
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `
-    <div class="card">
-      <h2>${t('joinRoomTitle')}</h2>
-      <p>${t('joinDesc')}</p>
-      <label style="font-size:12px;color:var(--ink-soft);">${t('enterName')}</label>
-      <input class="form-input" id="nameInput2" placeholder="${t('nameExample2')}" value="${escapeHtml(ui.nameInput)}">
-      <label style="font-size:12px;color:var(--ink-soft);">${t('roomCode')}</label>
-      <input class="form-input code-input" id="codeInput" maxlength="6" placeholder="${t('roomCode')}" value="${escapeHtml(ui.codeInput)}">
-      <div class="center">
-        <button class="btn primary" id="doJoin">${t('join')}</button>
-      </div>
-      ${ui.joinError ? `<div class="err-text center">${escapeHtml(ui.joinError)}</div>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="joinRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="back2">${t('back')}</button></div>
-    </div>
-  `;
-  stage.appendChild(wrap);
-
-  document.getElementById('nameInput2').oninput = e => { ui.nameInput = e.target.value; };
-  document.getElementById('codeInput').oninput = e => { ui.codeInput = e.target.value.toUpperCase(); };
-  document.getElementById('doJoin').onclick = () => window.joinRoom();
-  document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
-  document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
-  
-  // Issue #2: URLコピーボタン
-  if (ui.codeInput) {
-    const copyArea = document.createElement('div');
-    copyArea.className = 'center';
-    copyArea.style.marginTop = '10px';
-    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
-    
-    const urlBox = document.createElement('div');
-    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = generateRoomURL(ui.codeInput);
-    copyArea.appendChild(urlBox);
-    
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'btn small';
-    copyBtn.textContent = 'URLをコピー';
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(generateRoomURL(ui.codeInput)).then(() => {
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      }).catch(() => {
-        const textArea = document.createElement('textarea');
-        textArea.value = generateRoomURL(ui.codeInput);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      });
-    };
-    copyArea.appendChild(copyBtn);
-    stage.appendChild(copyArea);
-  }
-  
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) chatPanel.style.display = 'none';
-}
-
-// ===== ロビー画面 =====
-function renderLobby(stage) {
-  const { roomView, isHost, myPlayerIndex } = getNetworkState();
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `
-    <div class="card">
-      <h2>${t('lobbyTitle')}</h2>
-      <p>${t('lobbyDesc')}</p>
-      <div class="room-code-display">${escapeHtml(roomView.code)}</div>
-      <p style="font-size:12px;color:var(--ink-soft);">${t('expansionRule')}：${roomView.expansionEnabled ? t('use') : t('dontUse')}</p>
-      <div class="player-list" id="pList"></div>
-      <div class="center" style="margin-top:20px;">
-        ${isHost ? `<button class="btn primary" id="startBtn" ${roomView.players.length < 2 ? 'disabled' : ''}>${t('start')}（${roomView.players.length}/${t('maxPlayers')}）</button>` : `<div class="wait-panel"><div>${t('waiting')}<span class="wait-dots"></span></div></div>`}
-      </div>
-      ${isHost && roomView.players.length < 2 ? `<p class="err-text center">${t('minimumPlayers')}</p>` : ''}
-      <div class="center" style="margin-top:14px;"><button class="rules-link" id="lobbyRulesBtn">${t('howToPlay')}</button> · <button class="btn small" id="leaveBtn">${t('leave')}</button></div>
-    </div>
-    <div class="conn-note live">${t('directConnect')}</div>
-  `;
-  stage.appendChild(wrap);
-
-  const pl = document.getElementById('pList');
-  roomView.players.forEach((p, i) => {
-    const row = document.createElement('div');
-    row.className = 'player-row';
-    row.style.borderLeftColor = p.color;
-    row.innerHTML = `<span class="dot" style="background:${p.color}"></span><span>${escapeHtml(p.name)}</span>${isHost && i === 0 ? '<span class="tag">' + t('host') + '</span>' : ''}${i === myPlayerIndex ? '<span class="tag">' + t('you') + '</span>' : ''}${p.connected === false ? '<span class="tag" style="color:var(--blood);">' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? '<span class="tag">🤖</span>' : ''}`;
-    pl.appendChild(row);
-  });
-
-  if (isHost) document.getElementById('startBtn').onclick = () => window.hostStartGame();
-  document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
-  document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
-  
-  // Issue #2: ホスト用URLコピーボタン
-  if (isHost) {
-    const copyArea = document.createElement('div');
-    copyArea.className = 'center';
-    copyArea.style.marginTop = '10px';
-    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
-    
-    const urlBox = document.createElement('div');
-    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = generateRoomURL(roomView.code);
-    copyArea.appendChild(urlBox);
-    
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'btn small';
-    copyBtn.textContent = 'URLをコピー';
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(generateRoomURL(roomView.code)).then(() => {
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      }).catch(() => {
-        const textArea = document.createElement('textarea');
-        textArea.value = generateRoomURL(roomView.code);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      });
-    };
-    copyArea.appendChild(copyBtn);
-    stage.appendChild(copyArea);
-  }
-  
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel) chatPanel.style.display = 'block';
-}
-
-// ===== スコアボード =====
-function buildScoreboard(highlightIdx) {
-  const { roomView, myPlayerIndex } = getNetworkState();
-  const sb = document.createElement('div');
-  sb.className = 'scoreboard';
-  roomView.players.forEach((p, i) => {
-    const el = document.createElement('div');
-    el.className = 'score-chip' + (i === highlightIdx ? ' turn' : '');
-    el.style.setProperty('--pc', p.color);
-    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">⚠︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' 🤖' : ''}</span>
-      <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>`;
-    sb.appendChild(el);
-  });
-  return sb;
-}
-
-// ===== アリバイ確認 =====
-function renderAlibi(stage) {
-  const { roomView, myPlayerIndex } = getNetworkState();
-  if (alibiLocal.round !== roomView.round) { 
-    alibiLocal = { round: roomView.round, shown: false, values: null }; 
-  }
-  const n = roomView.players.length;
-  const neighbor = (myPlayerIndex + 1) % n;
-  const acked = roomView.alibiAcked[myPlayerIndex];
-
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('alibi')}</span><span>${t('confirmedCount')} ${roomView.alibiAcked.filter(Boolean).length} / ${n}</span></div>`;
-
-  const card = document.createElement('div');
-  card.className = 'card';
-  
-  if (acked) {
-    card.innerHTML = `<h2>${t('alibiComplete')}</h2><p>${t('waitingOthers')}</p>`;
-  } else if (!alibiLocal.shown) {
-    card.innerHTML = `<h2>${t('alibi')}</h2><p>${t('alibiDesc')} <strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiDesc2')}</p>`;
-  } else {
-    const myValue = alibiLocal.values.mine;
-    const neighborValue = alibiLocal.values.neighbor;
-    const myFlipClass = isFlipValue(myValue) ? ' is-flip' : '';
-    const neighborFlipClass = isFlipValue(neighborValue) ? ' is-flip' : '';
-    
-    card.innerHTML = `
-      <h2>${t('alibi')}</h2>
-      <p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>
-      <div style="display:flex; gap:20px; justify-content:center; margin:20px 0;">
-        <div style="text-align:center;">
-          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${t('you')}</div>
-          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div class="head${myFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(myValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(myValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(myValue)}</div>
-            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
-          </div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">${escapeHtml(roomView.players[neighbor].name)}</div>
-          <div style="width:70px; height:90px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div class="head${neighborFlipClass}" style="width:40px; height:40px; border-radius:50%; background:${isFlipValue(neighborValue) ? 'var(--blood)' : 'var(--paper-deep)'}; color:${isFlipValue(neighborValue) ? '#fff' : 'var(--ink)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; margin-bottom:6px;">${formatFlipValue(neighborValue)}</div>
-            <div style="font-size:10px; color:var(--ink-soft);">${t('person')}</div>
-          </div>
-        </div>
-      </div>
-      <p style="font-size:12px; color:var(--ink-soft);">${t('waitingAlibi')}</p>
-    `;
-  }
-  wrap.appendChild(card);
-
-  const actionArea = document.createElement('div');
-  actionArea.className = 'center';
-  if (!acked) {
-    if (!alibiLocal.shown) {
-      actionArea.innerHTML = `<button class="btn" id="viewAlibi">${t('checkTiles')}</button>`;
-    } else {
-      actionArea.innerHTML = `<button class="btn primary" id="closeAlibi">${t('hideNext')}</button>`;
-    }
-  }
-  wrap.appendChild(actionArea);
-  wrap.appendChild(buildScoreboard(-1));
-  
-  const p = document.createElement('p');
-  p.className = 'center';
-  p.style.cssText = 'margin-top:18px;';
-  const rulesBtn = document.createElement('button');
-  rulesBtn.className = 'rules-link';
-  rulesBtn.textContent = t('howToPlay');
-  rulesBtn.onclick = () => window.openRulesModal();
-  const sep = document.createTextNode(' · ');
-  const leaveBtn = document.createElement('button');
-  leaveBtn.className = 'btn small';
-  leaveBtn.style.opacity = '.6';
-  leaveBtn.textContent = t('leave');
-  leaveBtn.onclick = () => window.leaveRoom();
-  p.appendChild(rulesBtn);
-  p.appendChild(sep);
-  p.appendChild(leaveBtn);
-  wrap.appendChild(p);
-  
-  stage.appendChild(wrap);
-
-  const va = document.getElementById('viewAlibi');
-  const ca = document.getElementById('closeAlibi');
-  if (!acked && !alibiLocal.shown && va) {
-    va.onclick = async () => {
-      const { result, error } = await Net.alibi();
-      if (error) return;
-      alibiLocal.values = result;
-      alibiLocal.shown = true;
+  let code;
+  if (ui.useCustomCode && ui.customCode) {
+    code = ui.customCode.toUpperCase().trim();
+    if (code.length < 3 || code.length > 6) {
+      ui.screen = 'create';
+      ui.createError = t('codeLengthError');
       render(stage);
-    };
-  } else if (!acked && alibiLocal.shown && ca) {
-    ca.onclick = async () => { await Net.ackAlibi(); };
-  }
-}
-
-// ===== 証言フェーズ =====
-function renderTurns(stage) {
-  const { roomView, myPlayerIndex } = getNetworkState();
-  ensureTurnLocal(roomView);
-  const curIdx = roomView.turnOrder[roomView.currentPos];
-  const isMyTurn = curIdx === myPlayerIndex;
-  const tl = turnLocal;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
-  wrap.appendChild(buildScoreboard(curIdx));
-  
-  if (alibiLocal.shown && alibiLocal.values) {
-    const myAlibiPanel = document.createElement('div');
-    myAlibiPanel.className = 'my-cards-panel';
-    myAlibiPanel.innerHTML = `<h3>${t('confirmedPeople')}</h3><div class="cards-display">
-      <div class="mini-card">
-        <div class="mini-head${isFlipValue(alibiLocal.values.mine) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.mine)}</div>
-        <div class="mini-body">${t('person')}</div>
-        <div class="mini-label">${t('you')}</div>
-      </div>
-      <div class="mini-card">
-        <div class="mini-head${isFlipValue(alibiLocal.values.neighbor) ? ' is-flip' : ''}">${formatFlipValue(alibiLocal.values.neighbor)}</div>
-        <div class="mini-body">${t('person')}</div>
-        <div class="mini-label">${escapeHtml(roomView.players[(myPlayerIndex + 1) % roomView.players.length].name)}</div>
-      </div>
-    </div>`;
-    wrap.appendChild(myAlibiPanel);
-  }
-
-  const p = document.createElement('p');
-  p.className = 'center';
-  p.style.cssText = 'margin-top:18px;';
-  const rulesBtn = document.createElement('button');
-  rulesBtn.className = 'rules-link';
-  rulesBtn.textContent = t('howToPlay');
-  rulesBtn.onclick = () => window.openRulesModal();
-  const sep = document.createTextNode(' · ');
-  const leaveBtn = document.createElement('button');
-  leaveBtn.className = 'btn small';
-  leaveBtn.style.opacity = '.6';
-  leaveBtn.textContent = t('leave');
-  leaveBtn.onclick = () => window.leaveRoom();
-  p.appendChild(rulesBtn);
-  p.appendChild(sep);
-  p.appendChild(leaveBtn);
-  wrap.appendChild(p);
-
-  // Issue #5: 3Dカードめくり
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'grove-table';
-  tableWrap.innerHTML = '<div class="table-surface"></div>';
-  
-  const victimSpot = document.createElement('div');
-  victimSpot.className = 'victim-spot';
-  victimSpot.innerHTML = `
-    <div class="victim-tile">
-      <div class="v-kanji">${t('victimKanji')}</div>
-      <div style="font-size:8px;letter-spacing:.1em;">${t('hidden')}</div>
-    </div>
-  `;
-  tableWrap.appendChild(victimSpot);
-  
-  for (let i = 0; i < 3; i++) {
-    const spot = document.createElement('div');
-    spot.className = 'suspect-spot';
-    spot.setAttribute('data-idx', i);
-    
-    const peekedValue = tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
-    const isPeeked = peekedValue !== null;
-    const isChosen = tl.guessChoice === i;
-    const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
-    
-    const flipContainer = document.createElement('div');
-    flipContainer.className = 'card-flip-container';
-    
-    const flipper = document.createElement('div');
-    flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
-    
-    const front = document.createElement('div');
-    front.className = 'card-front';
-    front.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head">？</div>
-      <div class="g-body">伏せ</div>
-    `;
-    
-    const back = document.createElement('div');
-    back.className = 'card-back';
-    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
-    back.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head${headClass}">${isPeeked ? formatFlipValue(peekedValue) : ''}</div>
-      <div class="g-body">${isPeeked ? t('confirmed') : '？'}</div>
-    `;
-    
-    flipper.appendChild(front);
-    flipper.appendChild(back);
-    flipContainer.appendChild(flipper);
-    
-    if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        if (tl.chosenTwo.has(i)) {
-          tl.chosenTwo.delete(i);
-          flipper.classList.remove('flipped');
-        } else if (tl.chosenTwo.size < 2) {
-          flipper.classList.add('flipped');
-          setTimeout(() => {
-            tl.chosenTwo.add(i);
-            render(stage);
-          }, 300);
-        }
-      };
-    } else if (isMyTurn && tl.evidenceSeen) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        tl.guessChoice = i;
-        flipper.classList.add('flipped');
-        render(stage);
-      };
-    }
-    
-    spot.appendChild(flipContainer);
-    tableWrap.appendChild(spot);
-  }
-  wrap.appendChild(tableWrap);
-
-  if (!isMyTurn) {
-    const wp = document.createElement('div');
-    wp.className = 'wait-panel';
-    wp.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('currentTurn')}</p><div class="who" style="color:${roomView.players[curIdx].color}">${escapeHtml(roomView.players[curIdx].name)}</div><p style="font-size:12.5px;color:var(--ink-soft);">${t('listeningTestimony')}<span class="wait-dots"></span></p>`;
-    wrap.appendChild(wp);
-    stage.appendChild(wrap);
-    return;
-  }
-
-  const actionArea = document.createElement('div');
-  actionArea.className = 'center';
-  actionArea.style.marginTop = '18px';
-
-  if (!tl.evidenceSeen) {
-    if (roomView.currentPos === 0) {
-      const remaining = 2 - (tl.chosenTwo ? tl.chosenTwo.size : 0);
-      actionArea.innerHTML = `
-        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
-          ${t('firstDetective')} ${t('tapSuspect')}${t('checkNumbers')}<br>
-          <span style="color:var(--blood); font-weight:600;">${remaining} ${t('remainingSelect')}</span>
-        </p>
-        ${(tl.chosenTwo && tl.chosenTwo.size === 2) ? `<button class="btn primary" id="confirmPeek">${t('confirm')}</button>` : ''}
-      `;
-      wrap.appendChild(actionArea);
-      stage.appendChild(wrap);
-      
-      const cp = document.getElementById('confirmPeek');
-      if (cp && tl.chosenTwo && tl.chosenTwo.size === 2) {
-        cp.onclick = async () => {
-          const { result, error } = await Net.peek([...tl.chosenTwo]);
-          if (error) return;
-          tl.peekedValues = result.values;
-          tl.evidenceSeen = true;
-          render(stage);
-        };
-      }
-      return;
-    } else {
-      actionArea.innerHTML = `
-        <p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">
-          ${t('exceptPrevious')} ${t('touchRemaining')}
-        </p>
-        <button class="btn primary" id="viewEvidence">${t('viewEvidence')}</button>
-      `;
-      wrap.appendChild(actionArea);
-      stage.appendChild(wrap);
-      const ve = document.getElementById('viewEvidence');
-      if (ve) {
-        ve.onclick = async () => {
-          const { result, error } = await Net.peek([]);
-          if (error) return;
-          tl.peekedValues = result.values;
-          tl.evidenceSeen = true;
-          render(stage);
-        };
-      }
       return;
     }
-  }
-
-  if (roomView.currentPos === 0 && roomView.expansionEnabled && !tl.swapDecided) {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto 14px;">${t('expansionDesc')}</p>
-      <div class="row" style="justify-content:center;" id="swapButtons"></div>`;
-    wrap.appendChild(actionArea);
-    stage.appendChild(wrap);
-    const sb = document.getElementById('swapButtons');
-    if (sb) {
-      for (let i = 0; i < 3; i++) {
-        const b = document.createElement('button');
-        b.className = 'btn small';
-        b.textContent = `${labels[i]} ${t('swap')}`;
-        b.onclick = async () => { 
-          const { error } = await Net.swap(i); 
-          if (error) return; 
-          tl.swapDecided = true; 
-          render(stage); 
-        };
-        sb.appendChild(b);
-      }
-      const skip = document.createElement('button');
-      skip.className = 'btn small'; 
-      skip.textContent = t('noSwap');
-      skip.onclick = async () => { 
-        const { error } = await Net.swap('skip'); 
-        if (error) return; 
-        tl.swapDecided = true; 
-        render(stage); 
-      };
-      sb.appendChild(skip);
-    }
-    return;
-  }
-
-  if (tl.guessChoice === null || tl.guessChoice === undefined) {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);">${t('tapCulprit')}</p>`;
   } else {
-    actionArea.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);margin-bottom:12px;">${t('currentlySelected')} <strong style="color:var(--blood);">${labels[tl.guessChoice]}</strong> ${t('selected')}</p>`;
-    const b = document.createElement('button');
-    b.className = 'btn primary';
-    b.textContent = (roomView.currentPos === roomView.players.length - 1) ? t('finalTruth') : t('next');
-    b.onclick = async () => {
-      const guessChoice = tl.guessChoice;
-      const { error } = await Net.guess(guessChoice);
-      if (error) return;
-      turnLocal = null;
-    };
-    actionArea.appendChild(b);
+    code = genCode();
   }
-  wrap.appendChild(actionArea);
-  stage.appendChild(wrap);
-}
 
-// ===== 真相解明 =====
-function renderReveal(stage) {
-  const { roomView, isHost } = getNetworkState();
-  const culprit = roomView.culpritIndex;
-  const s = roomView.center.suspects;
-  const hasFive = s.includes(5);
-  let explain;
-  if (culprit === null || culprit === undefined) { explain = t('impossible'); }
-  else if (hasFive) { explain = `${t('hasFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
-  else { explain = `${t('noFiveExplain')} ${labels[culprit]} ${t('wasCulprit')}`; }
-
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
-  wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('reveal')}</span></div>`;
-
-  const suspectsRow = document.createElement('div');
-  suspectsRow.className = 'suspects-row';
-  for (let i = 0; i < 3; i++) {
-    const card = document.createElement('div');
-    card.className = 'suspect-card' + (i === culprit ? ' culprit' : '');
-    card.innerHTML = `
-      <div class="s-label">${labels[i]}</div>
-      <div class="head ${isFlipValue(s[i]) ? 'is-flip' : ''}">${formatFlipValue(s[i])}</div>
-      <div class="body">${t('person')}</div>
-    `;
-    suspectsRow.appendChild(card);
-  }
-  wrap.appendChild(suspectsRow);
-
-  const explainBox = document.createElement('div');
-  explainBox.className = 'reveal-explain';
-  explainBox.textContent = explain;
-  wrap.appendChild(explainBox);
-
-  const resList = document.createElement('div');
-  resList.className = 'resolution-list';
-  (roomView.resolutionLog || []).forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'resolution-row ' + (r.correct ? 'correct' : 'wrong');
-    row.innerHTML = `<span class="res-icon">${r.icon || ''}</span>${escapeHtml(r.text)}`;
-    resList.appendChild(row);
+  let settled = false;
+  const p = new Promise(resolve => {
+    try {
+      const peer = new PeerCtor('yabu-' + code);
+      peer.on('open', () => { if (settled) return; settled = true; resolve(peer); });
+      peer.on('error', (err) => { if (settled) return; settled = true; try { peer.destroy(); } catch (e) {} resolve(null); });
+    } catch (e) { resolve(null); }
   });
-  wrap.appendChild(resList);
-  wrap.appendChild(buildScoreboard(-1));
-  
-  const btnArea = document.createElement('div');
-  btnArea.className = 'center';
-  btnArea.style.marginTop = '22px';
-  const anyOver = roomView.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
-  if (isHost) {
-    const b = document.createElement('button');
-    b.className = 'btn primary';
-    b.textContent = anyOver ? t('viewFinal') : t('nextRound');
-    b.onclick = () => window.hostAdvanceAfterReveal();
-    btnArea.appendChild(b);
-  } else {
-    btnArea.innerHTML = `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHost')}<span class="wait-dots"></span></p>`;
+
+  const peer = await p;
+  if (!peer) {
+    ui.screen = 'create';
+    ui.createError = t('roomInUse');
+    render(stage);
+    return;
   }
-  wrap.appendChild(btnArea);
-  stage.appendChild(wrap);
+
+  setNetworkState({ isHost: true, peer, room: { code, phase: 'lobby', expansionEnabled: !!ui.expansionChoice, players: [], round: 1, startIdx: 0 } });
+  const { room } = getNetworkState();
+  const out = actJoin(room, name, 'HOST', null, new Map());
+  setNetworkState({ myPlayerIndex: out.result.playerIndex, roomView: redact(room, new Map()) });
+  
+  peer.on('connection', conn => {
+    conn.on('data', msg => hostHandleRequest(conn, msg));
+    conn.on('close', () => { hostBroadcast(); });
+  });
+  
+  ui.screen = null;
+  startHeartbeat();
+  render(stage);
+};
+
+// ===== 部屋参加 =====
+window.joinRoom = function() {
+  const { ui } = getUIState();
+  const code = (ui.codeInput || '').trim().toUpperCase();
+  const name = (ui.nameInput || '').trim();
+  if (!code) { ui.joinError = t('enterCode'); render(stage); return; }
+  
+  ui.screen = 'connecting'; ui.joinError = null; ui.disconnected = false;
+  render(stage);
+  
+  setNetworkState({ isHost: false });
+  const token = getOrCreateToken(code);
+  
+  try {
+    const peer = new PeerCtor();
+    setNetworkState({ peer });
+    peer.on('open', () => {
+      const hostConn = peer.connect('yabu-' + code, { reliable: true });
+      setNetworkState({ hostConn });
+      hostConn.on('open', async () => {
+        const { result, error } = await sendToHost('join', { name, token });
+        if (error) {
+          ui.screen = 'join'; ui.joinError = error;
+          try { peer.destroy(); } catch (e) {}
+          render(stage);
+          return;
+        }
+        setNetworkState({ myPlayerIndex: result.playerIndex });
+        ui.screen = null;
+        render(stage);
+      });
+      hostConn.on('data', clientHandleMessage);
+      hostConn.on('close', () => {
+        const { roomView } = getNetworkState();
+        if (roomView) { ui.disconnected = true; render(stage); }
+      });
+    });
+    peer.on('error', err => {
+      if (ui.screen !== 'connecting') return;
+      ui.screen = 'join';
+      ui.joinError = (err && err.type === 'peer-unavailable') ? t('roomNotFound') : t('connectionError');
+      render(stage);
+    });
+  } catch (e) {
+    ui.screen = 'join';
+    ui.joinError = t('connectionError');
+    render(stage);
+  }
+};
+
+// ===== 退出 =====
+window.leaveRoom = function() {
+  const confirmMsg = t('leaveConfirm');
+  if (!confirm(confirmMsg)) return;
+  
+  const { hostConn, peer, connections } = getNetworkState();
+  try { if (hostConn) hostConn.close(); } catch (e) {}
+  try { if (peer) peer.destroy(); } catch (e) {}
+  
+  setNetworkState({ isHost: false, peer: null, hostConn: null, connections: new Map(), room: null, roomView: null, myPlayerIndex: -1 });
+  const { ui } = getUIState();
+  ui.screen = 'title'; ui.nameInput = ''; ui.codeInput = ''; ui.customCode = ''; ui.useCustomCode = false; ui.expansionChoice = false; ui.joinError = null; ui.createError = null; ui.disconnected = false;
+  setUIState({ ui, turnLocal: null, alibiLocal: { round: null, shown: false, values: null }, chatMessages: [], chatCollapsed: false });
+  clearGameState();
+  render(stage);
+};
+
+// ===== ゲーム開始 =====
+window.hostStartGame = function() {
+  const { room } = getNetworkState();
+  if (room.players.length < 2) return;
+  buildRoundState(room);
+  hostBroadcast();
+};
+
+// ===== ラウンド進行 =====
+window.hostAdvanceAfterReveal = function() {
+  const { room } = getNetworkState();
+  const result = advanceRound(room);
+  if (result.changed) hostBroadcast();
+};
+
+// ===== もう一度 =====
+window.hostPlayAgain = function() {
+  const { room } = getNetworkState();
+  room.round = 1; room.startIdx = 0;
+  room.players.forEach(p => { p.faceUp = 5; p.faceDown = 0; });
+  buildRoundState(room);
+  hostBroadcast();
+};
+
+// ===== ゲーム復元 =====
+window.restoreGame = function(savedRoom) {
+  const code = savedRoom.code;
+  let settled = false;
+  const p = new Promise(resolve => {
+    try {
+      const peer = new PeerCtor('yabu-' + code);
+      peer.on('open', () => { if (settled) return; settled = true; resolve(peer); });
+      peer.on('error', (err) => { if (settled) return; settled = true; try { peer.destroy(); } catch (e) {} resolve(null); });
+    } catch (e) { resolve(null); }
+  });
+  p.then(peer => {
+    if (!peer) { alert(t('roomInUse')); return; }
+    setNetworkState({ isHost: true, peer, room: savedRoom, myPlayerIndex: 0, roomView: redact(savedRoom, new Map()) });
+    peer.on('connection', conn => {
+      conn.on('data', msg => hostHandleRequest(conn, msg));
+      conn.on('close', () => { hostBroadcast(); });
+    });
+    const { ui } = getUIState();
+    ui.screen = null;
+    render(stage);
+  });
+};
+
+// ===== Issue #17: キックされた時の処理 =====
+window.onKicked = function() {
+  alert(t('kickedMessage'));
+  window.leaveRoom();
+};
+
+// ===== Issue #4: ブラウザ通知 =====
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  const current = getNotificationPermission();
+  if (current === true) return;
+  
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationPermission(true);
+      showNotificationBanner(t('notificationAllowed'));
+    } else {
+      setNotificationPermission(false);
+    }
+  } catch (e) {
+    console.warn('Notification permission error:', e);
+  }
 }
 
-// ===== 最終結果 =====
-function renderFinal(stage) {
-  const { roomView, isHost } = getNetworkState();
-  const minFaceDown = Math.min(...roomView.players.map(p => p.faceDown));
-  const winners = roomView.players.filter(p => p.faceDown === minFaceDown);
+function showNotificationBanner(message) {
+  const banner = document.createElement('div');
+  banner.className = 'notification-banner';
+  banner.textContent = message;
+  document.body.appendChild(banner);
+  setTimeout(() => {
+    banner.classList.add('fade-out');
+    setTimeout(() => document.body.removeChild(banner), 300);
+  }, 3000);
+}
 
-  const wrap = document.createElement('div');
-  wrap.className = 'fade';
+function sendTurnNotification(playerName) {
+  if (getNotificationPermission() !== true) return;
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
   
-  let winnerBanner = '';
-  if (winners.length > 0) {
-    const winnerNames = winners.map(w => escapeHtml(w.name)).join('·');
-    winnerBanner = `
-      <div class="winner-banner">
-        <h2> ${t('winner')}</h2>
-        <div class="winner-name">${winnerNames}</div>
+  try {
+    new Notification(t('notificationTitle'), {
+      body: `${playerName} - ${t('notificationBody')}`,
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔍</text></svg>'
+    });
+  } catch (e) {}
+}
+
+// ===== Issue #13: エモート表示 =====
+window.showEmote = function(emote, playerName) {
+  const display = document.createElement('div');
+  display.className = 'emote-display';
+  display.textContent = emote;
+  display.setAttribute('aria-label', `${playerName}: ${emote}`);
+  document.body.appendChild(display);
+  
+  setTimeout(() => {
+    display.classList.add('fade-out');
+    setTimeout(() => {
+      if (display.parentNode) document.body.removeChild(display);
+    }, 500);
+  }, 2500);
+};
+
+// ===== Issue #12: チュートリアル =====
+window.openTutorialModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const steps = [
+    t('tutorialStep1'),
+    t('tutorialStep2'),
+    t('tutorialStep3'),
+    t('tutorialStep4')
+  ];
+  
+  const renderStep = (stepIdx) => {
+    overlay.innerHTML = `
+      <div class="modal-box rules-box">
+        <h3>${t('tutorial')} (${stepIdx + 1}/${steps.length})</h3>
+        <p style="font-size:15px; line-height:1.8; margin:20px 0;">${steps[stepIdx]}</p>
+        <div class="center" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
+          ${stepIdx > 0 ? `<button class="btn small" id="tutPrev">${t('tutorialPrev')}</button>` : ''}
+          ${stepIdx < steps.length - 1 ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>` : `<button class="btn primary small" id="tutFinish">完了</button>`}
+          <button class="btn small" id="tutSkip">${t('tutorialSkip')}</button>
+        </div>
       </div>
     `;
+    
+    const prev = document.getElementById('tutPrev');
+    const next = document.getElementById('tutNext');
+    const finish = document.getElementById('tutFinish');
+    const skip = document.getElementById('tutSkip');
+    
+    if (prev) prev.onclick = () => renderStep(stepIdx - 1);
+    if (next) next.onclick = () => renderStep(stepIdx + 1);
+    if (finish) finish.onclick = () => {
+      setTutorialCompleted();
+      document.body.removeChild(overlay);
+    };
+    if (skip) skip.onclick = () => {
+      setTutorialCompleted();
+      document.body.removeChild(overlay);
+    };
+  };
+  
+  renderStep(0);
+  document.body.appendChild(overlay);
+};
+
+// ===== Issue #9: 対戦履歴 =====
+window.openHistoryModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const history = getMatchHistory();
+  
+  let content = '';
+  if (history.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = history.map(h => {
+      const date = new Date(h.timestamp).toLocaleDateString(getCurrentLang() === 'ja' ? 'ja-JP' : 'en-US');
+      const winners = (h.winners || []).join('・');
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--gold); margin-bottom:8px; border-radius:0 8px 8px 0;">
+          <div style="font-size:12px; color:var(--ink-soft);">${date} · ${t('round')} ${h.round || 1}</div>
+          <div style="font-size:13px; margin-top:4px;">${t('winner')}: <strong style="color:var(--blood);">${escapeHtml(winners)}</strong></div>
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">${(h.players || []).join('・')}</div>
+        </div>
+      `;
+    }).join('');
   }
   
-  wrap.innerHTML = `
-    <div class="card"><h2>${t('gameEnd')}</h2><p>${roomView.round} ${t('allRoundsEnd')}</p></div>
-    ${winnerBanner}
-    <div class="card">
-      <h2>${getCurrentLang() === 'ja' ? '最終成績' : 'Final Results'}</h2>
-      ${roomView.players.slice().sort((a, b) => a.faceDown - b.faceDown).map(p => `
-        <div class="score-chip" style="width:100%;margin-bottom:8px;border-left:4px solid ${p.color};">
-          <span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${winners.includes(p) ? ' ★' + t('winner') : ''}</span>
-          <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>
-        </div>`).join('')}
-    </div>
-    <div class="center" style="margin-top:24px;">
-      ${isHost ? `<button class="btn primary" id="playAgain">${t('playAgain')}</button>` : `<p style="font-size:12.5px;color:var(--ink-soft);">${t('waitingHostFinal')}</p>`}
-      <button class="btn" id="leaveFinal" style="margin-left:10px;">${t('leave')}</button>
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('history')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeHistory">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
     </div>
   `;
-  stage.appendChild(wrap);
   
-  const pa = document.getElementById('playAgain');
-  const lf = document.getElementById('leaveFinal');
-  if (isHost && pa) pa.onclick = () => window.hostPlayAgain();
-  if (lf) lf.onclick = () => window.leaveRoom();
+  document.body.appendChild(overlay);
+  document.getElementById('closeHistory').onclick = () => document.body.removeChild(overlay);
+};
+
+// ===== Issue #10: 統計 =====
+window.openStatsModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const allStats = getAllPlayerStats();
+  const playerNames = Object.keys(allStats);
+  
+  let content = '';
+  if (playerNames.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = playerNames.map(name => {
+      const s = allStats[name];
+      const winRate = s.totalGames > 0 ? ((s.wins / s.totalGames) * 100).toFixed(1) : '0.0';
+      const avgFail = s.totalGames > 0 ? (s.totalFailChips / s.totalGames).toFixed(1) : '0.0';
+      const correctRate = s.totalGuesses > 0 ? ((s.totalCorrectGuesses / s.totalGuesses) * 100).toFixed(1) : '0.0';
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--bamboo); margin-bottom:8px; border-radius:0 8px 8px 0;">
+          <div style="font-size:14px; font-weight:600; color:var(--ink);">${escapeHtml(name)}</div>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">
+            ${t('totalGames')}: ${s.totalGames} · 
+            ${t('winRate')}: ${winRate}% · 
+            ${t('avgFailChips')}: ${avgFail} · 
+            ${t('correctRate')}: ${correctRate}%
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('stats')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeStats">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  document.getElementById('closeStats').onclick = () => document.body.removeChild(overlay);
+};
+
+// ===== ルールモーダル =====
+window.openRulesModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const lang = getCurrentLang();
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${lang === 'ja' ? '遊び方 — 藪の中' : 'How to Play — In a Grove'}</h3>
+      <h4>${lang === 'ja' ? '概要' : 'Overview'}</h4>
+      <p>${lang === 'ja' ? '竹林で一体の骸が見つかった。現場には「被害者」1枚と「容疑者」3枚の数字タイルが伏せられている。プレイヤーは2〜5人。全員が少しずつ違う手がかりを持ち寄り、証言を重ねながら「本当の犯人」を推理する。' : 'A corpse was found in a bamboo grove. At the scene are 1 "Victim" tile and 3 "Suspect" tiles placed face down. 2-5 players work together to deduce the "true culprit".'}</p>
+      <h4>${lang === 'ja' ? '① アリバイ確認フェーズ' : '① Alibi Check Phase'}</h4>
+      <p>${lang === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
+      <h4>${lang === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
+      <ul>
+        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
+        <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
+      </ul>
+      <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <ul>
+        <li>${lang === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
+        <li>${lang === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
+      </ul>
+      <h4>${lang === 'ja' ? '④ チップの精算' : '④ Chip Settlement'}</h4>
+      <ul>
+        <li>${lang === 'ja' ? '真犯人にチップを置いていた人は、チップが無事に戻ってくる。' : 'Players who placed chips on the true culprit get their chips back safely.'}</li>
+        <li>${lang === 'ja' ? '外れた容疑者にチップを置いていた人たちは、全員「手持ち」を1枚失う。さらに、その山に最後にチップを置いた人が、山にあったチップ全部を「失敗チップ」としてまとめて引き取る。' : 'Players who placed chips on wrong suspects each lose 1 "hand" chip. Furthermore, the person who placed the last chip on that pile takes all chips from that pile as "failure chips".'}</li>
+      </ul>
+      <h4>${lang === 'ja' ? '⑤ 終了と勝敗' : '⑤ End Game & Victory'}</h4>
+      <p>${lang === 'ja' ? 'ラウンド終了時に、誰かの「失敗チップ」が8枚以上、または「手持ち」が0枚になっていたら、そこで捜査終了。「失敗チップ」が最も少ない人が勝者。' : 'At round end, if anyone has 8 or more "failure chips" or 0 "hand" chips, the investigation ends. The player with the fewest "failure chips" wins.'}</p>
+      <div class="rule-note">${t('flip5')}</div>
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${lang === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  document.getElementById('closeRules').onclick = () => document.body.removeChild(overlay);
+};
+
+// ===== 言語切り替え =====
+document.getElementById('langBtn').onclick = function() {
+  const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
+  triggerLangChange(newLang);
+  this.textContent = getLangName(newLang === 'ja' ? 'en' : 'ja');
+  const { labels } = getUIState();
+  setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
+  render(stage);
+};
+
+// ===== チャット初期化 =====
+function initChat() {
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('chatSend');
+  const header = document.getElementById('chatHeader');
+  const panel = document.getElementById('chatPanel');
+
+  if (panel) panel.style.display = 'none';
+
+  if (header) {
+    header.onclick = function() {
+      const { chatCollapsed } = getUIState();
+      const newCollapsed = !chatCollapsed;
+      setUIState({ chatCollapsed: newCollapsed });
+      if (panel) {
+        if (newCollapsed) panel.classList.add('collapsed');
+        else panel.classList.remove('collapsed');
+      }
+    };
+  }
+
+  if (!input || !send) return;
+  send.onclick = () => {
+    const text = input.value.trim();
+    if (!text) return;
+    Net.chat(text);
+    input.value = '';
+  };
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') send.click();
+  });
 }
+
+// ===== チャットメッセージ受信 =====
+window.onChatMessage = function(chatMsg) {
+  const { chatMessages } = getUIState();
+  chatMessages.push(chatMsg);
+  if (chatMessages.length > 50) chatMessages.shift();
+  setUIState({ chatMessages });
+  
+  const messages = document.getElementById('chatMessages');
+  if (messages) {
+    const lang = getCurrentLang();
+    messages.innerHTML = chatMessages.map(m => {
+      const time = new Date(m.ts).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+      return `<div class="chat-message"><span class="chat-time">[${escapeHtml(time)}]</span><span class="chat-name">${escapeHtml(m.name)}:</span> <span class="chat-text">${escapeHtml(m.text)}</span></div>`;
+    }).join('');
+    messages.scrollTop = messages.scrollHeight;
+  }
+  
+  const panel = document.getElementById('chatPanel');
+  if (panel) panel.style.display = 'block';
+};
+
+// ===== ゲーム状態変更 =====
+window.onGameStateChanged = function(view) {
+  render(stage);
+  
+  // Issue #4: 手番通知
+  if (view && view.phase === 'turns') {
+    const { myPlayerIndex } = getNetworkState();
+    const curIdx = view.turnOrder[view.currentPos];
+    if (curIdx === myPlayerIndex) {
+      sendTurnNotification(view.players[myPlayerIndex]?.name);
+    }
+  }
+  
+  // Issue #20: ボットターン処理
+  if (view && view.phase === 'turns') {
+    setTimeout(() => {
+      const { isHost } = getNetworkState();
+      if (isHost) {
+        const { room } = getNetworkState();
+        if (room && room.phase === 'turns') {
+          const botIdx = room.turnOrder[room.currentPos];
+          const bot = room.players[botIdx];
+          if (bot && bot.isBot) {
+            processBotTurnIfNeeded();
+          }
+        }
+      }
+    }, 800);
+  }
+};
+
+// ===== Issue #14: PWAインストール =====
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+});
+
+window.installPWA = async function() {
+  if (!deferredPrompt) {
+    showNotificationBanner(t('installPrompt'));
+    return;
+  }
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+};
+
+// ===== Issue #19: beforeunload警告 =====
+window.addEventListener('beforeunload', (e) => {
+  const { isHost, room } = getNetworkState();
+  if (isHost && room && room.phase !== 'final' && room.phase !== 'lobby') {
+    e.preventDefault();
+    e.returnValue = t('tabCloseWarning');
+  }
+});
+
+// ===== Issue #4: 初回アクセス時に通知許可を促す =====
+if (getNotificationPermission() === null && 'Notification' in window) {
+  setTimeout(() => {
+    requestNotificationPermission();
+  }, 3000);
+}
+
+// ===== 初期化 =====
+initChat();
+render(stage);
