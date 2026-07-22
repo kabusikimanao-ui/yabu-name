@@ -1,16 +1,17 @@
 // js/app.js
-import { getURLParam } from './utils.js';
-import { getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
-import { getSettings, updateSettings, isTutorialCompleted, getNotificationPermission } from './storage.js';
-import { getNetworkState, processBotTurnIfNeeded } from './network.js';
-import { render } from './ui-render.js';
-import { getUIState, setUIState } from './ui-state.js';
+import { genCode } from './utils.js';
+import { t, getCurrentLang, triggerLangChange, getLangName } from './i18n.js';
+import { getOrCreateToken, clearGameState, getNotificationPermission, setNotificationPermission } from './storage.js';
+import { buildRoundState, actJoin, redact, advanceRound } from './game-core.js';
+import { getNetworkState, setNetworkState, hostBroadcast, hostHandleRequest, sendToHost, clientHandleMessage, startHeartbeat, Net } from './network.js';
+import { render, getUIState, setUIState } from './ui-state.js'; // ui-render.js ではなく ui-state.js からインポート
 import { createRoom, joinRoom, leaveRoom, hostStartGame, hostAdvanceAfterReveal, hostPlayAgain, restoreGame, onKicked } from './controllers/game-controller.js';
 import { openTutorialModal, openHistoryModal, openStatsModal, openRulesModal, showEmote } from './controllers/modal-controller.js';
 import { initChat, handleChatMessage } from './features/chat.js';
 import { requestNotificationPermission, showNotificationBanner, sendTurnNotification } from './features/notifications.js';
 
 const stage = document.getElementById('stage');
+const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
 
 // ===== グローバル関数の登録 =====
 window.createRoom = createRoom();
@@ -46,17 +47,11 @@ if (roomCodeFromUrl) {
   ui.screen = 'join';
 }
 
-const settings = getSettings();
-if (settings.darkMode) document.documentElement.setAttribute('data-theme', 'dark');
-if (settings.highContrast) document.documentElement.setAttribute('data-contrast', 'high');
-if (settings.reduceMotion) document.documentElement.setAttribute('data-reduce-motion', 'true');
-
 // ===== イベントリスナーの設定 =====
 document.getElementById('langBtn').onclick = function() {
   const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
   triggerLangChange(newLang);
   this.textContent = getLangName(newLang === 'ja' ? 'en' : 'ja');
-  const { labels } = getUIState();
   setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
   render(stage);
 };
@@ -84,12 +79,6 @@ window.onGameStateChanged = function(view) {
     if (curIdx === myPlayerIndex) {
       sendTurnNotification(view.players[myPlayerIndex]?.name);
     }
-  }
-  
-  if (view && view.phase === 'turns') {
-    setTimeout(() => {
-      processBotTurnIfNeeded();
-    }, 800);
   }
 };
 
