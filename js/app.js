@@ -1,14 +1,37 @@
-import { escapeHtml, genCode, shuffle, freshDeckValues, PLAYER_COLORS } from './utils.js';
-import { t, getCurrentLang, setCurrentLang } from './i18n.js';
-import { saveGameState, loadGameState, clearGameState, getOrCreateToken } from './storage.js';
-import { buildRoundState, resolveChipsInto, actJoin, redact } from './game-core.js';
-import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net } from './network.js';
+import { escapeHtml, genCode, getURLParam, generateRoomURL } from './utils.js';
+import { t, getCurrentLang, setCurrentLang, triggerLangChange, getSupportedLangs, getLangName } from './i18n.js';
+import { saveGameState, loadGameState, clearGameState, getOrCreateToken, getMatchHistory, getPlayerStats, getAllPlayerStats, getSettings, updateSettings, isTutorialCompleted, setTutorialCompleted, getNotificationPermission, setNotificationPermission } from './storage.js';
+import { buildRoundState, resolveChipsInto, actJoin, redact, finalizeGame, advanceRound, processBotTurnIfNeeded, addBot } from './game-core.js';
+import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded as netProcessBotTurn } from './network.js';
 import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
 
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
 const stage = document.getElementById('stage');
 
-// グローバルに関数を公開 (HTML内のonclick用)
+// ===== Issue #2: URLパラメータの解析 =====
+const urlParams = new URLSearchParams(window.location.search);
+const roomCodeFromUrl = urlParams.get('room');
+if (roomCodeFromUrl) {
+  const { ui } = getUIState();
+  ui.codeInput = roomCodeFromUrl.toUpperCase();
+  ui.screen = 'join';
+}
+
+// ===== Issue #8: ダークモードの初期適用 =====
+const settings = getSettings();
+if (settings.darkMode) {
+  document.documentElement.setAttribute('data-theme', 'dark');
+}
+
+// ===== Issue #19: アクセシビリティ設定の初期適用 =====
+if (settings.highContrast) {
+  document.documentElement.setAttribute('data-contrast', 'high');
+}
+if (settings.reduceMotion) {
+  document.documentElement.setAttribute('data-reduce-motion', 'true');
+}
+
+// ===== 部屋作成 =====
 window.createRoom = async function() {
   const { ui } = getUIState();
   const name = (ui.nameInput || '').trim() || (getCurrentLang() === 'ja' ? '探偵1' : 'Detective1');
@@ -60,6 +83,7 @@ window.createRoom = async function() {
   render(stage);
 };
 
+// ===== 部屋参加 =====
 window.joinRoom = function() {
   const { ui } = getUIState();
   const code = (ui.codeInput || '').trim().toUpperCase();
@@ -109,6 +133,7 @@ window.joinRoom = function() {
   }
 };
 
+// ===== 退出 =====
 window.leaveRoom = function() {
   const confirmMsg = t('leaveConfirm');
   if (!confirm(confirmMsg)) return;
@@ -125,6 +150,7 @@ window.leaveRoom = function() {
   render(stage);
 };
 
+// ===== ゲーム開始 =====
 window.hostStartGame = function() {
   const { room } = getNetworkState();
   if (room.players.length < 2) return;
@@ -132,18 +158,14 @@ window.hostStartGame = function() {
   hostBroadcast();
 };
 
+// ===== ラウンド進行 =====
 window.hostAdvanceAfterReveal = function() {
   const { room } = getNetworkState();
-  const anyOver = room.players.some(p => p.faceDown >= 8 || p.faceUp <= 0);
-  if (anyOver) { room.phase = 'final'; }
-  else {
-    room.round += 1;
-    room.startIdx = (room.startIdx + 1) % room.players.length;
-    buildRoundState(room);
-  }
-  hostBroadcast();
+  const result = advanceRound(room);
+  if (result.changed) hostBroadcast();
 };
 
+// ===== もう一度 =====
 window.hostPlayAgain = function() {
   const { room } = getNetworkState();
   room.round = 1; room.startIdx = 0;
@@ -152,6 +174,7 @@ window.hostPlayAgain = function() {
   hostBroadcast();
 };
 
+// ===== ゲーム復元 =====
 window.restoreGame = function(savedRoom) {
   const code = savedRoom.code;
   let settled = false;
@@ -175,50 +198,260 @@ window.restoreGame = function(savedRoom) {
   });
 };
 
+// ===== Issue #17: キックされた時の処理 =====
+window.onKicked = function() {
+  alert(t('kickedMessage'));
+  window.leaveRoom();
+};
+
+// ===== Issue #4: ブラウザ通知 =====
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  const current = getNotificationPermission();
+  if (current === true) return;
+  
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationPermission(true);
+      showNotificationBanner(t('notificationAllowed'));
+    } else {
+      setNotificationPermission(false);
+    }
+  } catch (e) {
+    console.warn('Notification permission error:', e);
+  }
+}
+
+function showNotificationBanner(message) {
+  const banner = document.createElement('div');
+  banner.className = 'notification-banner';
+  banner.textContent = message;
+  document.body.appendChild(banner);
+  setTimeout(() => {
+    banner.classList.add('fade-out');
+    setTimeout(() => document.body.removeChild(banner), 300);
+  }, 3000);
+}
+
+function sendTurnNotification(playerName) {
+  if (getNotificationPermission() !== true) return;
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  
+  try {
+    new Notification(t('notificationTitle'), {
+      body: `${playerName} - ${t('notificationBody')}`,
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔍</text></svg>'
+    });
+  } catch (e) {}
+}
+
+// ===== Issue #13: エモート表示 =====
+window.showEmote = function(emote, playerName) {
+  const display = document.createElement('div');
+  display.className = 'emote-display';
+  display.textContent = emote;
+  display.setAttribute('aria-label', `${playerName}: ${emote}`);
+  document.body.appendChild(display);
+  
+  setTimeout(() => {
+    display.classList.add('fade-out');
+    setTimeout(() => {
+      if (display.parentNode) document.body.removeChild(display);
+    }, 500);
+  }, 2500);
+};
+
+// ===== Issue #12: チュートリアル =====
+window.openTutorialModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const steps = [
+    t('tutorialStep1'),
+    t('tutorialStep2'),
+    t('tutorialStep3'),
+    t('tutorialStep4')
+  ];
+  
+  const renderStep = (stepIdx) => {
+    overlay.innerHTML = `
+      <div class="modal-box rules-box">
+        <h3>${t('tutorial')} (${stepIdx + 1}/${steps.length})</h3>
+        <p style="font-size:15px; line-height:1.8; margin:20px 0;">${steps[stepIdx]}</p>
+        <div class="center" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
+          ${stepIdx > 0 ? `<button class="btn small" id="tutPrev">${t('tutorialPrev')}</button>` : ''}
+          ${stepIdx < steps.length - 1 ? `<button class="btn primary small" id="tutNext">${t('tutorialNext')}</button>` : `<button class="btn primary small" id="tutFinish">完了</button>`}
+          <button class="btn small" id="tutSkip">${t('tutorialSkip')}</button>
+        </div>
+      </div>
+    `;
+    
+    const prev = document.getElementById('tutPrev');
+    const next = document.getElementById('tutNext');
+    const finish = document.getElementById('tutFinish');
+    const skip = document.getElementById('tutSkip');
+    
+    if (prev) prev.onclick = () => renderStep(stepIdx - 1);
+    if (next) next.onclick = () => renderStep(stepIdx + 1);
+    if (finish) finish.onclick = () => {
+      setTutorialCompleted();
+      document.body.removeChild(overlay);
+    };
+    if (skip) skip.onclick = () => {
+      setTutorialCompleted();
+      document.body.removeChild(overlay);
+    };
+  };
+  
+  renderStep(0);
+  document.body.appendChild(overlay);
+};
+
+// ===== Issue #9: 対戦履歴 =====
+window.openHistoryModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const history = getMatchHistory();
+  
+  let content = '';
+  if (history.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = history.map(h => {
+      const date = new Date(h.timestamp).toLocaleDateString(getCurrentLang() === 'ja' ? 'ja-JP' : 'en-US');
+      const winners = (h.winners || []).join('・');
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--gold); margin-bottom:8px; border-radius:0 8px 8px 0;">
+          <div style="font-size:12px; color:var(--ink-soft);">${date} · ${t('round')} ${h.round || 1}</div>
+          <div style="font-size:13px; margin-top:4px;">${t('winner')}: <strong style="color:var(--blood);">${escapeHtml(winners)}</strong></div>
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">${(h.players || []).join('・')}</div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('history')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeHistory">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  document.getElementById('closeHistory').onclick = () => document.body.removeChild(overlay);
+};
+
+// ===== Issue #10: 統計 =====
+window.openStatsModal = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const allStats = getAllPlayerStats();
+  const playerNames = Object.keys(allStats);
+  
+  let content = '';
+  if (playerNames.length === 0) {
+    content = `<p style="text-align:center; color:var(--ink-soft);">${t('noHistory')}</p>`;
+  } else {
+    content = playerNames.map(name => {
+      const s = allStats[name];
+      const winRate = s.totalGames > 0 ? ((s.wins / s.totalGames) * 100).toFixed(1) : '0.0';
+      const avgFail = s.totalGames > 0 ? (s.totalFailChips / s.totalGames).toFixed(1) : '0.0';
+      const correctRate = s.totalGuesses > 0 ? ((s.totalCorrectGuesses / s.totalGuesses) * 100).toFixed(1) : '0.0';
+      return `
+        <div style="padding:12px; background:#f4ecd6; border-left:4px solid var(--bamboo); margin-bottom:8px; border-radius:0 8px 8px 0;">
+          <div style="font-size:14px; font-weight:600; color:var(--ink);">${escapeHtml(name)}</div>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">
+            ${t('totalGames')}: ${s.totalGames} · 
+            ${t('winRate')}: ${winRate}% · 
+            ${t('avgFailChips')}: ${avgFail} · 
+            ${t('correctRate')}: ${correctRate}%
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  overlay.innerHTML = `
+    <div class="modal-box rules-box">
+      <h3>${t('stats')}</h3>
+      ${content}
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeStats">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  document.getElementById('closeStats').onclick = () => document.body.removeChild(overlay);
+};
+
+// ===== ルールモーダル =====
 window.openRulesModal = function() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  
+  const lang = getCurrentLang();
   overlay.innerHTML = `
     <div class="modal-box rules-box">
-      <h3>${getCurrentLang() === 'ja' ? '遊び方 — 藪の中' : 'How to Play — In a Grove'}</h3>
-      <h4>${getCurrentLang() === 'ja' ? '概要' : 'Overview'}</h4>
-      <p>${getCurrentLang() === 'ja' ? '竹林で一体の骸が見つかった。現場には「被害者」1枚と「容疑者」3枚の数字タイルが伏せられている。プレイヤーは2〜5人。全員が少しずつ違う手がかりを持ち寄り、証言を重ねながら「本当の犯人」を推理する。' : 'A corpse was found in a bamboo grove. At the scene are 1 "Victim" tile and 3 "Suspect" tiles placed face down. 2-5 players work together to deduce the "true culprit".'}</p>
-      <h4>${getCurrentLang() === 'ja' ? '① アリバイ確認フェーズ' : '① Alibi Check Phase'}</h4>
-      <p>${getCurrentLang() === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
-      <h4>${getCurrentLang() === 'ja' ? '② 証言フェーズ' : ' Testimony Phase'}</h4>
+      <h3>${lang === 'ja' ? '遊び方 — 藪の中' : 'How to Play — In a Grove'}</h3>
+      <h4>${lang === 'ja' ? '概要' : 'Overview'}</h4>
+      <p>${lang === 'ja' ? '竹林で一体の骸が見つかった。現場には「被害者」1枚と「容疑者」3枚の数字タイルが伏せられている。プレイヤーは2〜5人。全員が少しずつ違う手がかりを持ち寄り、証言を重ねながら「本当の犯人」を推理する。' : 'A corpse was found in a bamboo grove. At the scene are 1 "Victim" tile and 3 "Suspect" tiles placed face down. 2-5 players work together to deduce the "true culprit".'}</p>
+      <h4>${lang === 'ja' ? '① アリバイ確認フェーズ' : '① Alibi Check Phase'}</h4>
+      <p>${lang === 'ja' ? '各ラウンドの最初に、現場の4枚とは別の「事件と無関係な人物」のタイルが、自分と隣の人にそれぞれ配られる。両方を確認すると、除外情報が手に入る。' : 'At the start of each round, tiles of "people unrelated to the case" are dealt to you and your neighbor.'}</p>
+      <h4>${lang === 'ja' ? '② 証言フェーズ' : '② Testimony Phase'}</h4>
       <ul>
-        <li><b>${getCurrentLang() === 'ja' ? '第一発見者' : 'First Detective'}</b>：${getCurrentLang() === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
-        <li><b>${getCurrentLang() === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${getCurrentLang() === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
+        <li><b>${lang === 'ja' ? '第一発見者' : 'First Detective'}</b>：${lang === 'ja' ? '容疑者カードをタッチして、好きな2人の数字を覗く。最後に犯人だと思う容疑者にチップを置く。' : 'Touch suspect cards to peek at 2 people\'s numbers. Finally, place your chip on the suspect you believe is the culprit.'}</li>
+        <li><b>${lang === 'ja' ? '2番手以降' : '2nd Player Onwards'}</b>：${lang === 'ja' ? '直前の人がチップを置いた容疑者を除く、残り2人の数字を確認できる。' : 'Excluding the suspect where the previous player placed their chip, check the numbers of the remaining 2.'}</li>
       </ul>
-      <h4>${getCurrentLang() === 'ja' ? ' 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
+      <h4>${lang === 'ja' ? '③ 真犯人の見分け方' : '③ Identifying the True Culprit'}</h4>
       <ul>
-        <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
-        <li>${getCurrentLang() === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
+        <li>${lang === 'ja' ? '「↓5↑」がいる場合 → 最も小さい数字の容疑者が真犯人。' : 'If "↓5↑" is among the suspects → The suspect with the smallest number is the true culprit.'}</li>
+        <li>${lang === 'ja' ? '「↓5↑」がいない場合 → 最も大きい数字の容疑者が真犯人。' : 'If "↓5↑" is not present → The suspect with the largest number is the true culprit.'}</li>
       </ul>
-      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${getCurrentLang() === 'ja' ? '閉じる' : 'Close'}</button></div>
-    </div>`;
+      <h4>${lang === 'ja' ? '④ チップの精算' : '④ Chip Settlement'}</h4>
+      <ul>
+        <li>${lang === 'ja' ? '真犯人にチップを置いていた人は、チップが無事に戻ってくる。' : 'Players who placed chips on the true culprit get their chips back safely.'}</li>
+        <li>${lang === 'ja' ? '外れた容疑者にチップを置いていた人たちは、全員「手持ち」を1枚失う。さらに、その山に最後にチップを置いた人が、山にあったチップ全部を「失敗チップ」としてまとめて引き取る。' : 'Players who placed chips on wrong suspects each lose 1 "hand" chip. Furthermore, the person who placed the last chip on that pile takes all chips from that pile as "failure chips".'}</li>
+      </ul>
+      <h4>${lang === 'ja' ? '⑤ 終了と勝敗' : '⑤ End Game & Victory'}</h4>
+      <p>${lang === 'ja' ? 'ラウンド終了時に、誰かの「失敗チップ」が8枚以上、または「手持ち」が0枚になっていたら、そこで捜査終了。「失敗チップ」が最も少ない人が勝者。' : 'At round end, if anyone has 8 or more "failure chips" or 0 "hand" chips, the investigation ends. The player with the fewest "failure chips" wins.'}</p>
+      <div class="rule-note">${t('flip5')}</div>
+      <div class="center" style="margin-top:20px;"><button class="btn primary small" id="closeRules">${lang === 'ja' ? '閉じる' : 'Close'}</button></div>
+    </div>
+  `;
+  
   document.body.appendChild(overlay);
-  document.getElementById('closeRules').onclick = () => { document.body.removeChild(overlay); };
+  document.getElementById('closeRules').onclick = () => document.body.removeChild(overlay);
 };
 
-// 言語切り替え
+// ===== 言語切り替え =====
 document.getElementById('langBtn').onclick = function() {
   const newLang = getCurrentLang() === 'ja' ? 'en' : 'ja';
-  setCurrentLang(newLang);
-  this.textContent = newLang === 'ja' ? 'English' : '日本語';
+  triggerLangChange(newLang);
+  this.textContent = getLangName(newLang === 'ja' ? 'en' : 'ja');
   const { labels } = getUIState();
   setUIState({ labels: newLang === 'ja' ? ['容疑者 A', '容疑者 B', '容疑者 C'] : ['Suspect A', 'Suspect B', 'Suspect C'] });
   render(stage);
 };
 
-// チャット初期化
+// ===== チャット初期化 =====
 function initChat() {
   const input = document.getElementById('chatInput');
   const send = document.getElementById('chatSend');
   const header = document.getElementById('chatHeader');
   const panel = document.getElementById('chatPanel');
 
-  // 初期状態では非表示
   if (panel) panel.style.display = 'none';
 
   if (header) {
@@ -245,7 +478,7 @@ function initChat() {
   });
 }
 
-// チャットメッセージ受信時の処理
+// ===== チャットメッセージ受信 =====
 window.onChatMessage = function(chatMsg) {
   const { chatMessages } = getUIState();
   chatMessages.push(chatMsg);
@@ -266,19 +499,55 @@ window.onChatMessage = function(chatMsg) {
   if (panel) panel.style.display = 'block';
 };
 
-// ゲーム状態変更時の処理
+// ===== ゲーム状態変更 =====
 window.onGameStateChanged = function(view) {
   render(stage);
   
-  // チャットの表示制御
-  const chatPanel = document.getElementById('chatPanel');
-  if (chatPanel && view) {
-    // ロビー・ゲーム中はチャットを表示
-    chatPanel.style.display = 'block';
+  // Issue #4: 手番通知
+  if (view && view.phase === 'turns') {
+    const { myPlayerIndex } = getNetworkState();
+    const curIdx = view.turnOrder[view.currentPos];
+    if (curIdx === myPlayerIndex) {
+      sendTurnNotification(view.players[myPlayerIndex]?.name);
+    }
+  }
+  
+  // Issue #20: ボットターン処理
+  if (view && view.phase === 'turns') {
+    setTimeout(() => {
+      const { isHost } = getNetworkState();
+      if (isHost) {
+        const { room } = getNetworkState();
+        if (room && room.phase === 'turns') {
+          const botIdx = room.turnOrder[room.currentPos];
+          const bot = room.players[botIdx];
+          if (bot && bot.isBot) {
+            processBotTurnIfNeeded();
+          }
+        }
+      }
+    }, 800);
   }
 };
 
-// ホストのbeforeunload警告
+// ===== Issue #14: PWAインストール =====
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+});
+
+window.installPWA = async function() {
+  if (!deferredPrompt) {
+    showNotificationBanner(t('installPrompt'));
+    return;
+  }
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+};
+
+// ===== Issue #19: beforeunload警告 =====
 window.addEventListener('beforeunload', (e) => {
   const { isHost, room } = getNetworkState();
   if (isHost && room && room.phase !== 'final' && room.phase !== 'lobby') {
@@ -286,14 +555,14 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = t('tabCloseWarning');
   }
 });
-// URLパラメータの解析（部屋番号自動入力）
-const urlParams = new URLSearchParams(window.location.search);
-const roomCodeFromUrl = urlParams.get('room');
-if (roomCodeFromUrl) {
-  const { ui } = getUIState();
-  ui.codeInput = roomCodeFromUrl.toUpperCase();
-  ui.screen = 'join';
+
+// ===== Issue #4: 初回アクセス時に通知許可を促す =====
+if (getNotificationPermission() === null && 'Notification' in window) {
+  setTimeout(() => {
+    requestNotificationPermission();
+  }, 3000);
 }
-// 初期化
+
+// ===== 初期化 =====
 initChat();
 render(stage);
