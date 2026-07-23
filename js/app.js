@@ -715,7 +715,6 @@ if (getNotificationPermission() === null && 'Notification' in window) {
   setTimeout(() => {
     requestNotificationPermission();
   }, 3000);
-}
 
 // ===== 初期化 =====
 initChat();
