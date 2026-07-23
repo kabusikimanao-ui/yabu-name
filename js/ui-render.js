@@ -22,9 +22,154 @@ export function setUIState(state) {
 export function ensureTurnLocal(roomView) {
   const key = roomView.round + '-' + roomView.currentPos + '-' + roomView.phase;
   if (!turnLocal || turnLocal.key !== key) {
-    // 修正: pendingCountを追加（カード選択の競合状態対策。下記renderTurns参照）
-    turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), pendingCount: 0, swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
+    turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
   }
+}
+
+// ===== 円卓（藪の盤面）— 対戦部分はこちらのデザインを使用 =====
+// カードクリックを同期的にchosenTwo/guessChoiceへ反映するため、
+// 以前の「300ms遅延で選択枚数が競合するバグ」もこの実装では発生しない。
+function buildGroveTable(roomView, myPlayerIndex, tl, opts) {
+  opts = opts || {};
+  const showValues = !!opts.showValues;
+  const clickableMode = opts.clickable || null; // 'peek-select' | 'guess' | null
+  const onChange = opts.onChange || (() => {});
+  const center = roomView.center;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'grove-table';
+
+  const surface = document.createElement('div');
+  surface.className = 'table-surface';
+  wrap.appendChild(surface);
+
+  // 被害者（中央）
+  const victimSpot = document.createElement('div');
+  victimSpot.className = 'victim-spot';
+  const victimTile = document.createElement('div');
+  victimTile.className = 'victim-tile' + (showValues ? ' revealed' : '');
+  if (showValues && center.victim !== null && center.victim !== undefined) {
+    const vFlipClass = isFlipValue(center.victim) ? ' is-flip' : '';
+    victimTile.innerHTML = `
+      <div class="v-kanji">${t('victimKanji')}</div>
+      <div class="v-value${vFlipClass}">${formatFlipValue(center.victim)}</div>
+    `;
+  } else {
+    victimTile.innerHTML = `
+      <div class="v-kanji">${t('victimKanji')}</div>
+      <div style="font-size:8px;letter-spacing:.1em;">${t('hidden')}</div>
+    `;
+  }
+  victimSpot.appendChild(victimTile);
+  wrap.appendChild(victimSpot);
+
+  // 容疑者3人（円周上）
+  const unseenLabel = getCurrentLang() === 'ja' ? '見なかった' : 'Unseen';
+  for (let i = 0; i < 3; i++) {
+    const spot = document.createElement('div');
+    spot.className = 'suspect-spot';
+    spot.setAttribute('data-idx', i);
+
+    const card = document.createElement('div');
+
+    const peekedValue = tl && tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
+    const isPeeked = peekedValue !== null;
+    const isChosen = !!(tl && tl.guessChoice === i);
+    const isSelectedForPeek = !!(tl && tl.chosenTwo && tl.chosenTwo.has(i));
+    const isCulprit = showValues && i === roomView.culpritIndex;
+
+    let classes = 'grove-card';
+    if (isPeeked) classes += ' peeked';
+    if (isChosen) classes += ' chosen';
+    if (isSelectedForPeek) classes += ' selected-for-peek';
+    if (isCulprit) classes += ' culprit';
+    card.className = classes;
+
+    let headContent = '';
+    let bodyContent = '？';
+    let headClass = '';
+
+    if (showValues && center.suspects[i] !== null && center.suspects[i] !== undefined) {
+      const val = center.suspects[i];
+      headContent = formatFlipValue(val);
+      bodyContent = t('person');
+      if (isFlipValue(val)) headClass = ' is-flip';
+    } else if (isPeeked) {
+      headContent = formatFlipValue(peekedValue);
+      bodyContent = t('confirmed');
+      if (isFlipValue(peekedValue)) headClass = ' is-flip';
+    }
+
+    card.innerHTML = `
+      <div class="g-label">${labels[i]}</div>
+      <div class="g-head${headClass}">${headContent}</div>
+      <div class="g-body">${bodyContent}</div>
+      ${roomView.unseenIdx === i ? `<div class="unseen-badge">${unseenLabel}</div>` : ''}
+      <div class="chip-stack">${(roomView.chipsAt[i] || []).map(pi => `<span class="chip-dot" style="background:${roomView.players[pi].color}">${escapeHtml(roomView.players[pi].name.slice(0, 1))}</span>`).join('')}</div>
+    `;
+
+    if (clickableMode) {
+      const curIdx = roomView.turnOrder[roomView.currentPos];
+      const isMyTurn = curIdx === myPlayerIndex;
+
+      if (clickableMode === 'peek-select' && isMyTurn && roomView.currentPos === 0 && tl && !tl.evidenceSeen && !isPeeked) {
+        card.classList.add('clickable');
+        card.style.cursor = 'pointer';
+        card.onclick = () => {
+          if (tl.chosenTwo.has(i)) {
+            tl.chosenTwo.delete(i);
+          } else if (tl.chosenTwo.size < 2) {
+            tl.chosenTwo.add(i);
+          }
+          onChange();
+        };
+      } else if (clickableMode === 'guess' && isMyTurn && tl && tl.evidenceSeen) {
+        card.classList.add('clickable');
+        card.style.cursor = 'pointer';
+        card.onclick = () => {
+          tl.guessChoice = i;
+          onChange();
+        };
+      }
+    }
+
+    spot.appendChild(card);
+    wrap.appendChild(spot);
+  }
+
+  return wrap;
+}
+
+// ===== 確認済み容疑者パネル（ターン中ずっと表示） =====
+function buildPeekedSuspectsPanel(tl) {
+  const panel = document.createElement('div');
+  panel.className = 'peeked-suspects-panel';
+  const heading = getCurrentLang() === 'ja' ? '確認した容疑者（ターン中ずっと表示）' : 'Confirmed Suspects (Displayed Throughout Turn)';
+  panel.innerHTML = `<h3>${heading}</h3>`;
+
+  const display = document.createElement('div');
+  display.className = 'peeked-display';
+
+  if (tl && tl.peekedValues && Object.keys(tl.peekedValues).length > 0) {
+    display.innerHTML = Object.entries(tl.peekedValues).map(([idx, val]) => {
+      const label = labels[parseInt(idx, 10)];
+      const valueText = formatFlipValue(val);
+      const flipClass = isFlipValue(val) ? ' is-flip' : '';
+      return `
+        <div class="peeked-card">
+          <div class="p-head${flipClass}">${valueText}</div>
+          <div class="p-body">${t('person')}</div>
+          <div class="p-label">${label}</div>
+        </div>
+      `;
+    }).join('');
+  } else {
+    const empty = getCurrentLang() === 'ja' ? '容疑者カードをタッチして確認してください' : 'Touch suspect cards to confirm';
+    display.innerHTML = `<p style="color:var(--ink-soft); font-size:12px;">${empty}</p>`;
+  }
+
+  panel.appendChild(display);
+  return panel;
 }
 
 // ===== 招待URLコピー欄（共通化） =====
@@ -197,7 +342,13 @@ function renderCreate(stage) {
   document.getElementById('nameInput').oninput = e => { ui.nameInput = e.target.value; };
   document.getElementById('useCustomCode').onchange = e => { ui.useCustomCode = e.target.checked; render(stage); };
   const cci = document.getElementById('customCodeInput');
-  if (cci) cci.oninput = e => { ui.customCode = e.target.value.toUpperCase(); };
+  if (cci) cci.oninput = e => {
+    // 修正: 原因不明の二重入力（例:「111」→「1111」）に対する防御的な正規化。
+    // DOM側のvalueも直接書き戻して、表示とui.customCodeを常に一致させる。
+    const normalized = e.target.value.toUpperCase().slice(0, 6);
+    if (e.target.value !== normalized) e.target.value = normalized;
+    ui.customCode = normalized;
+  };
 
   const expRow = document.getElementById('expRow');
   [{ v: false, label: t('dontUse') }, { v: true, label: t('use') }].forEach(opt => {
@@ -238,7 +389,13 @@ function renderJoin(stage) {
   stage.appendChild(wrap);
 
   document.getElementById('nameInput2').oninput = e => { ui.nameInput = e.target.value; };
-  document.getElementById('codeInput').oninput = e => { ui.codeInput = e.target.value.toUpperCase(); };
+  document.getElementById('codeInput').oninput = e => {
+    // 修正: 原因不明の二重入力（例:「111」→「1111」）に対する防御的な正規化。
+    // DOM側のvalueも直接書き戻して、表示とui.codeInputを常に一致させる。
+    const normalized = e.target.value.toUpperCase().slice(0, 6);
+    if (e.target.value !== normalized) e.target.value = normalized;
+    ui.codeInput = normalized;
+  };
   document.getElementById('doJoin').onclick = () => window.joinRoom();
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
@@ -444,6 +601,12 @@ function renderTurns(stage) {
     wrap.appendChild(myAlibiPanel);
   }
 
+  // 修正: 対戦部分を提供いただいたコードのデザイン（円卓カード・チップスタック・
+  // 「見なかった」バッジ・確認済み容疑者パネル）に統合
+  if (tl.peekedValues && Object.keys(tl.peekedValues).length > 0) {
+    wrap.appendChild(buildPeekedSuspectsPanel(tl));
+  }
+
   const p = document.createElement('p');
   p.className = 'center';
   p.style.cssText = 'margin-top:18px;';
@@ -462,91 +625,18 @@ function renderTurns(stage) {
   p.appendChild(leaveBtn);
   wrap.appendChild(p);
 
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'grove-table';
-  tableWrap.innerHTML = '<div class="table-surface"></div>';
-
-  const victimSpot = document.createElement('div');
-  victimSpot.className = 'victim-spot';
-  victimSpot.innerHTML = `
-    <div class="victim-tile">
-      <div class="v-kanji">${t('victimKanji')}</div>
-      <div style="font-size:8px;letter-spacing:.1em;">${t('hidden')}</div>
-    </div>
-  `;
-  tableWrap.appendChild(victimSpot);
-
-  for (let i = 0; i < 3; i++) {
-    const spot = document.createElement('div');
-    spot.className = 'suspect-spot';
-    spot.setAttribute('data-idx', i);
-
-    const peekedValue = tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
-    const isPeeked = peekedValue !== null;
-    const isChosen = tl.guessChoice === i;
-    const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
-
-    const flipContainer = document.createElement('div');
-    flipContainer.className = 'card-flip-container';
-
-    const flipper = document.createElement('div');
-    flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
-
-    const front = document.createElement('div');
-    front.className = 'card-front';
-    front.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head">？</div>
-      <div class="g-body">伏せ</div>
-    `;
-
-    const back = document.createElement('div');
-    back.className = 'card-back';
-    const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
-    back.innerHTML = `
-      <div class="g-label">${labels[i]}</div>
-      <div class="g-head${headClass}">${isPeeked ? formatFlipValue(peekedValue) : ''}</div>
-      <div class="g-body">${isPeeked ? t('confirmed') : '？'}</div>
-    `;
-
-    flipper.appendChild(front);
-    flipper.appendChild(back);
-    flipContainer.appendChild(flipper);
-
-    if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        if (tl.chosenTwo.has(i)) {
-          tl.chosenTwo.delete(i);
-          flipper.classList.remove('flipped');
-        } else if (tl.chosenTwo.size + tl.pendingCount < 2) {
-          // 修正: 300ms遅延の間にchosenTwo.sizeがまだ更新されておらず、
-          // 連続クリックで3枚以上選択できてしまうバグを修正。
-          // pendingCountで「まだSetに未追加だが選択中」の枚数も加味してガードする。
-          tl.pendingCount++;
-          flipper.classList.add('flipped');
-          setTimeout(() => {
-            tl.pendingCount--;
-            tl.chosenTwo.add(i);
-            render(stage);
-          }, 300);
-        }
-      };
-    } else if (isMyTurn && tl.evidenceSeen) {
-      flipContainer.classList.add('clickable');
-      flipContainer.style.cursor = 'pointer';
-      flipContainer.onclick = () => {
-        tl.guessChoice = i;
-        flipper.classList.add('flipped');
-        render(stage);
-      };
+  let clickableMode = null;
+  if (isMyTurn) {
+    if (!tl.evidenceSeen && roomView.currentPos === 0) {
+      clickableMode = 'peek-select';
+    } else if (tl.evidenceSeen) {
+      clickableMode = 'guess';
     }
-
-    spot.appendChild(flipContainer);
-    tableWrap.appendChild(spot);
   }
-  wrap.appendChild(tableWrap);
+  wrap.appendChild(buildGroveTable(roomView, myPlayerIndex, tl, {
+    clickable: clickableMode,
+    onChange: () => render(stage)
+  }));
 
   if (!isMyTurn) {
     const wp = document.createElement('div');
@@ -675,19 +765,8 @@ function renderReveal(stage) {
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round} ${t('reveal')}</span></div>`;
 
-  const suspectsRow = document.createElement('div');
-  suspectsRow.className = 'suspects-row';
-  for (let i = 0; i < 3; i++) {
-    const card = document.createElement('div');
-    card.className = 'suspect-card' + (i === culprit ? ' culprit' : '');
-    card.innerHTML = `
-      <div class="s-label">${labels[i]}</div>
-      <div class="head ${isFlipValue(s[i]) ? 'is-flip' : ''}">${formatFlipValue(s[i])}</div>
-      <div class="body">${t('person')}</div>
-    `;
-    suspectsRow.appendChild(card);
-  }
-  wrap.appendChild(suspectsRow);
+  // 修正: 対戦部分と同じ円卓デザイン（buildGroveTable）で真相解明を表示
+  wrap.appendChild(buildGroveTable(roomView, null, null, { showValues: true }));
 
   const explainBox = document.createElement('div');
   explainBox.className = 'reveal-explain';
