@@ -22,8 +22,42 @@ export function setUIState(state) {
 export function ensureTurnLocal(roomView) {
   const key = roomView.round + '-' + roomView.currentPos + '-' + roomView.phase;
   if (!turnLocal || turnLocal.key !== key) {
-    turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
+    // 修正: pendingCountを追加（カード選択の競合状態対策。下記renderTurns参照）
+    turnLocal = { key, evidenceSeen: false, chosenTwo: new Set(), pendingCount: 0, swapChoice: null, swapDecided: false, guessChoice: null, peekedValues: null };
   }
+}
+
+// ===== 招待URLコピー欄（共通化） =====
+// 修正: renderJoin / renderLobby で重複していたコピー処理を1箇所にまとめた
+function appendInviteUrlBox(container, code) {
+  const copyArea = document.createElement('div');
+  copyArea.className = 'center';
+  copyArea.style.marginTop = '10px';
+  copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
+  const urlBox = document.createElement('div');
+  urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
+  urlBox.textContent = generateRoomURL(code);
+  copyArea.appendChild(urlBox);
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn small';
+  copyBtn.textContent = 'URLをコピー';
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(generateRoomURL(code)).then(() => {
+      copyBtn.textContent = 'コピーしました！';
+      setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+    }).catch(() => {
+      const textArea = document.createElement('textarea');
+      textArea.value = generateRoomURL(code);
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      textArea.remove();
+      copyBtn.textContent = 'コピーしました！';
+      setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
+    });
+  };
+  copyArea.appendChild(copyBtn);
+  container.appendChild(copyArea);
 }
 
 // ===== メインrender関数 =====
@@ -34,10 +68,10 @@ export function render(stage) {
   if (ui.screen === 'create') { renderCreate(stage); return; }
   if (ui.screen === 'join') { renderJoin(stage); return; }
   if (ui.screen === 'connecting') { renderConnecting(stage); return; }
-  
+
   const { roomView, myPlayerIndex, isHost } = getNetworkState();
   if (!roomView) { renderConnecting(stage); return; }
-  
+
   if (roomView.phase === 'lobby') { renderLobby(stage); return; }
   if (roomView.phase === 'alibi') { renderAlibi(stage); return; }
   if (roomView.phase === 'turns') { renderTurns(stage); return; }
@@ -116,7 +150,7 @@ function renderTitle(stage) {
     document.documentElement.setAttribute('data-theme', newDark ? 'dark' : 'light');
     render(stage);
   };
-  
+
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -177,7 +211,7 @@ function renderCreate(stage) {
   document.getElementById('doCreate').onclick = () => window.createRoom();
   document.getElementById('back1').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('createRulesBtn').onclick = () => window.openRulesModal();
-  
+
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -208,38 +242,11 @@ function renderJoin(stage) {
   document.getElementById('doJoin').onclick = () => window.joinRoom();
   document.getElementById('back2').onclick = () => { ui.screen = 'title'; render(stage); };
   document.getElementById('joinRulesBtn').onclick = () => window.openRulesModal();
-  
+
   if (ui.codeInput) {
-    const copyArea = document.createElement('div');
-    copyArea.className = 'center';
-    copyArea.style.marginTop = '10px';
-    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
-    const urlBox = document.createElement('div');
-    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = generateRoomURL(ui.codeInput);
-    copyArea.appendChild(urlBox);
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'btn small';
-    copyBtn.textContent = 'URLをコピー';
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(generateRoomURL(ui.codeInput)).then(() => {
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      }).catch(() => {
-        const textArea = document.createElement('textarea');
-        textArea.value = generateRoomURL(ui.codeInput);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      });
-    };
-    copyArea.appendChild(copyBtn);
-    stage.appendChild(copyArea);
+    appendInviteUrlBox(stage, ui.codeInput); // 修正: 共通関数化
   }
-  
+
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'none';
 }
@@ -278,38 +285,11 @@ function renderLobby(stage) {
   if (isHost) document.getElementById('startBtn').onclick = () => window.hostStartGame();
   document.getElementById('leaveBtn').onclick = () => window.leaveRoom();
   document.getElementById('lobbyRulesBtn').onclick = () => window.openRulesModal();
-  
+
   if (isHost) {
-    const copyArea = document.createElement('div');
-    copyArea.className = 'center';
-    copyArea.style.marginTop = '10px';
-    copyArea.innerHTML = `<p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">友達を招待するURL:</p>`;
-    const urlBox = document.createElement('div');
-    urlBox.style.cssText = 'background:#f4ecd6; border:1px solid var(--paper-deep); padding:8px 12px; border-radius:4px; font-size:12px; word-break:break-all; margin-bottom:8px; max-width:400px; margin-left:auto; margin-right:auto;';
-    urlBox.textContent = generateRoomURL(roomView.code);
-    copyArea.appendChild(urlBox);
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'btn small';
-    copyBtn.textContent = 'URLをコピー';
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(generateRoomURL(roomView.code)).then(() => {
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      }).catch(() => {
-        const textArea = document.createElement('textarea');
-        textArea.value = generateRoomURL(roomView.code);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        copyBtn.textContent = 'コピーしました！';
-        setTimeout(() => { copyBtn.textContent = 'URLをコピー'; }, 2000);
-      });
-    };
-    copyArea.appendChild(copyBtn);
-    stage.appendChild(copyArea);
+    appendInviteUrlBox(stage, roomView.code); // 修正: 共通関数化
   }
-  
+
   const chatPanel = document.getElementById('chatPanel');
   if (chatPanel) chatPanel.style.display = 'block';
 }
@@ -323,7 +303,8 @@ function buildScoreboard(highlightIdx) {
     const el = document.createElement('div');
     el.className = 'score-chip' + (i === highlightIdx ? ' turn' : '');
     el.style.setProperty('--pc', p.color);
-    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' ' : ''}</span>
+    // 修正: p.isBotが半角スペースのみで見た目に反映されていなかったため🤖表示に統一
+    el.innerHTML = `<span class="sc-name" style="color:${p.color}">${escapeHtml(p.name)}${i === myPlayerIndex ? '（' + t('you') + '）' : ''}${p.connected === false ? ' <span style="color:var(--blood);">︎' + t('disconnectedTag') + '</span>' : ''}${p.isBot ? ' 🤖' : ''}</span>
       <span class="sc-nums"><span>${t('hand')} ${p.faceUp}</span><span>${t('fail')} ${p.faceDown}</span></span>`;
     sb.appendChild(el);
   });
@@ -333,8 +314,8 @@ function buildScoreboard(highlightIdx) {
 // ===== アリバイ確認 =====
 function renderAlibi(stage) {
   const { roomView, myPlayerIndex } = getNetworkState();
-  if (alibiLocal.round !== roomView.round) { 
-    alibiLocal = { round: roomView.round, shown: false, values: null }; 
+  if (alibiLocal.round !== roomView.round) {
+    alibiLocal = { round: roomView.round, shown: false, values: null };
   }
   const n = roomView.players.length;
   const neighbor = (myPlayerIndex + 1) % n;
@@ -346,7 +327,7 @@ function renderAlibi(stage) {
 
   const card = document.createElement('div');
   card.className = 'card';
-  
+
   if (acked) {
     card.innerHTML = `<h2>${t('alibiComplete')}</h2><p>${t('waitingOthers')}</p>`;
   } else if (!alibiLocal.shown) {
@@ -356,7 +337,7 @@ function renderAlibi(stage) {
     const neighborValue = alibiLocal.values.neighbor;
     const myFlipClass = isFlipValue(myValue) ? ' is-flip' : '';
     const neighborFlipClass = isFlipValue(neighborValue) ? ' is-flip' : '';
-    
+
     card.innerHTML = `
       <h2>${t('alibi')}</h2>
       <p><strong>${escapeHtml(roomView.players[neighbor].name)}</strong> ${t('alibiRevealed')}</p>
@@ -392,7 +373,7 @@ function renderAlibi(stage) {
   }
   wrap.appendChild(actionArea);
   wrap.appendChild(buildScoreboard(-1));
-  
+
   const p = document.createElement('p');
   p.className = 'center';
   p.style.cssText = 'margin-top:18px;';
@@ -410,7 +391,7 @@ function renderAlibi(stage) {
   p.appendChild(sep);
   p.appendChild(leaveBtn);
   wrap.appendChild(p);
-  
+
   stage.appendChild(wrap);
 
   const va = document.getElementById('viewAlibi');
@@ -418,13 +399,17 @@ function renderAlibi(stage) {
   if (!acked && !alibiLocal.shown && va) {
     va.onclick = async () => {
       const { result, error } = await Net.alibi();
-      if (error) return;
+      // 修正: エラー時に無反応だったのでフィードバックを追加
+      if (error) { alert(t('connectionError')); return; }
       alibiLocal.values = result;
       alibiLocal.shown = true;
       render(stage);
     };
   } else if (!acked && alibiLocal.shown && ca) {
-    ca.onclick = async () => { await Net.ackAlibi(); };
+    ca.onclick = async () => {
+      const { error } = await Net.ackAlibi();
+      if (error) alert(t('connectionError')); // 修正: エラーフィードバック追加
+    };
   }
 }
 
@@ -440,7 +425,7 @@ function renderTurns(stage) {
   wrap.className = 'fade';
   wrap.innerHTML = `<div class="round-header"><span>${t('round')} ${roomView.round}</span><span>${t('turn')} ${roomView.currentPos + 1} / ${roomView.players.length}</span></div>`;
   wrap.appendChild(buildScoreboard(curIdx));
-  
+
   if (alibiLocal.shown && alibiLocal.values) {
     const myAlibiPanel = document.createElement('div');
     myAlibiPanel.className = 'my-cards-panel';
@@ -480,7 +465,7 @@ function renderTurns(stage) {
   const tableWrap = document.createElement('div');
   tableWrap.className = 'grove-table';
   tableWrap.innerHTML = '<div class="table-surface"></div>';
-  
+
   const victimSpot = document.createElement('div');
   victimSpot.className = 'victim-spot';
   victimSpot.innerHTML = `
@@ -490,23 +475,23 @@ function renderTurns(stage) {
     </div>
   `;
   tableWrap.appendChild(victimSpot);
-  
+
   for (let i = 0; i < 3; i++) {
     const spot = document.createElement('div');
     spot.className = 'suspect-spot';
     spot.setAttribute('data-idx', i);
-    
+
     const peekedValue = tl.peekedValues && tl.peekedValues[i] !== undefined ? tl.peekedValues[i] : null;
     const isPeeked = peekedValue !== null;
     const isChosen = tl.guessChoice === i;
     const isSelectedForPeek = tl.chosenTwo && tl.chosenTwo.has(i);
-    
+
     const flipContainer = document.createElement('div');
     flipContainer.className = 'card-flip-container';
-    
+
     const flipper = document.createElement('div');
     flipper.className = 'card-flipper' + (isPeeked ? ' flipped' : '');
-    
+
     const front = document.createElement('div');
     front.className = 'card-front';
     front.innerHTML = `
@@ -514,7 +499,7 @@ function renderTurns(stage) {
       <div class="g-head">？</div>
       <div class="g-body">伏せ</div>
     `;
-    
+
     const back = document.createElement('div');
     back.className = 'card-back';
     const headClass = isPeeked && isFlipValue(peekedValue) ? ' is-flip' : '';
@@ -523,11 +508,11 @@ function renderTurns(stage) {
       <div class="g-head${headClass}">${isPeeked ? formatFlipValue(peekedValue) : ''}</div>
       <div class="g-body">${isPeeked ? t('confirmed') : '？'}</div>
     `;
-    
+
     flipper.appendChild(front);
     flipper.appendChild(back);
     flipContainer.appendChild(flipper);
-    
+
     if (isMyTurn && !tl.evidenceSeen && roomView.currentPos === 0 && !isPeeked) {
       flipContainer.classList.add('clickable');
       flipContainer.style.cursor = 'pointer';
@@ -535,9 +520,14 @@ function renderTurns(stage) {
         if (tl.chosenTwo.has(i)) {
           tl.chosenTwo.delete(i);
           flipper.classList.remove('flipped');
-        } else if (tl.chosenTwo.size < 2) {
+        } else if (tl.chosenTwo.size + tl.pendingCount < 2) {
+          // 修正: 300ms遅延の間にchosenTwo.sizeがまだ更新されておらず、
+          // 連続クリックで3枚以上選択できてしまうバグを修正。
+          // pendingCountで「まだSetに未追加だが選択中」の枚数も加味してガードする。
+          tl.pendingCount++;
           flipper.classList.add('flipped');
           setTimeout(() => {
+            tl.pendingCount--;
             tl.chosenTwo.add(i);
             render(stage);
           }, 300);
@@ -552,7 +542,7 @@ function renderTurns(stage) {
         render(stage);
       };
     }
-    
+
     spot.appendChild(flipContainer);
     tableWrap.appendChild(spot);
   }
@@ -583,12 +573,12 @@ function renderTurns(stage) {
       `;
       wrap.appendChild(actionArea);
       stage.appendChild(wrap);
-      
+
       const cp = document.getElementById('confirmPeek');
       if (cp && tl.chosenTwo && tl.chosenTwo.size === 2) {
         cp.onclick = async () => {
           const { result, error } = await Net.peek([...tl.chosenTwo]);
-          if (error) return;
+          if (error) { alert(t('connectionError')); return; } // 修正: エラーフィードバック追加
           tl.peekedValues = result.values;
           tl.evidenceSeen = true;
           render(stage);
@@ -608,7 +598,7 @@ function renderTurns(stage) {
       if (ve) {
         ve.onclick = async () => {
           const { result, error } = await Net.peek([]);
-          if (error) return;
+          if (error) { alert(t('connectionError')); return; } // 修正: エラーフィードバック追加
           tl.peekedValues = result.values;
           tl.evidenceSeen = true;
           render(stage);
@@ -629,22 +619,22 @@ function renderTurns(stage) {
         const b = document.createElement('button');
         b.className = 'btn small';
         b.textContent = `${labels[i]} ${t('swap')}`;
-        b.onclick = async () => { 
-          const { error } = await Net.swap(i); 
-          if (error) return; 
-          tl.swapDecided = true; 
-          render(stage); 
+        b.onclick = async () => {
+          const { error } = await Net.swap(i);
+          if (error) { alert(t('connectionError')); return; } // 修正: エラーフィードバック追加
+          tl.swapDecided = true;
+          render(stage);
         };
         sb.appendChild(b);
       }
       const skip = document.createElement('button');
-      skip.className = 'btn small'; 
+      skip.className = 'btn small';
       skip.textContent = t('noSwap');
-      skip.onclick = async () => { 
-        const { error } = await Net.swap('skip'); 
-        if (error) return; 
-        tl.swapDecided = true; 
-        render(stage); 
+      skip.onclick = async () => {
+        const { error } = await Net.swap('skip');
+        if (error) { alert(t('connectionError')); return; } // 修正: エラーフィードバック追加
+        tl.swapDecided = true;
+        render(stage);
       };
       sb.appendChild(skip);
     }
@@ -661,7 +651,7 @@ function renderTurns(stage) {
     b.onclick = async () => {
       const guessChoice = tl.guessChoice;
       const { error } = await Net.guess(guessChoice);
-      if (error) return;
+      if (error) { alert(t('connectionError')); return; } // 修正: エラーフィードバック追加
       turnLocal = null;
     };
     actionArea.appendChild(b);
@@ -714,7 +704,7 @@ function renderReveal(stage) {
   });
   wrap.appendChild(resList);
   wrap.appendChild(buildScoreboard(-1));
-  
+
   const btnArea = document.createElement('div');
   btnArea.className = 'center';
   btnArea.style.marginTop = '22px';
@@ -740,7 +730,7 @@ function renderFinal(stage) {
 
   const wrap = document.createElement('div');
   wrap.className = 'fade';
-  
+
   let winnerBanner = '';
   if (winners.length > 0) {
     const winnerNames = winners.map(w => escapeHtml(w.name)).join('·');
@@ -751,7 +741,7 @@ function renderFinal(stage) {
       </div>
     `;
   }
-  
+
   wrap.innerHTML = `
     <div class="card"><h2>${t('gameEnd')}</h2><p>${roomView.round} ${t('allRoundsEnd')}</p></div>
     ${winnerBanner}
@@ -769,7 +759,7 @@ function renderFinal(stage) {
     </div>
   `;
   stage.appendChild(wrap);
-  
+
   const pa = document.getElementById('playAgain');
   const lf = document.getElementById('leaveFinal');
   if (isHost && pa) pa.onclick = () => window.hostPlayAgain();
