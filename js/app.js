@@ -5,6 +5,43 @@ import { buildRoundState, resolveChipsInto, actJoin, redact, finalizeGame, advan
 import { getNetworkState, setNetworkState, hostBroadcast, sweepClosedConnections, hostHandleRequest, hostSelfAction, sendToHost, clientHandleMessage, startHeartbeat, Net, processBotTurnIfNeeded } from './network.js';
 import { render, getUIState, setUIState, ensureTurnLocal } from './ui-render.js';
 
+// ===== Faviconの動的追加 (404エラー回避) =====
+if (!document.querySelector('link[rel="icon"]')) {
+  const favicon = document.createElement('link');
+  favicon.rel = 'icon';
+  favicon.href = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ctext y=".9em" font-size="90"%3E🔍%3C/text%3E%3C/svg%3E';
+  document.head.appendChild(favicon);
+}
+
+// ===== ダークモードの視認性向上 =====
+const darkModeStyle = document.createElement('style');
+darkModeStyle.textContent = `
+  [data-theme="dark"] {
+    --ink: #e0e0e0;
+    --ink-soft: #a0a0a0;
+    --paper: #2b2b2b;
+    --paper-deep: #1a1a1a;
+    --paper-light: #3a3a3a;
+    --blood: #ff6b6b;
+    --bamboo: #81c784;
+    --gold: #ffd54f;
+    color-scheme: dark;
+  }
+  [data-theme="dark"] body, [data-theme="dark"] .card, [data-theme="dark"] .modal-box {
+    background-color: var(--paper) !important;
+    color: var(--ink) !important;
+  }
+  [data-theme="dark"] .btn {
+    color: var(--ink);
+  }
+  [data-theme="dark"] input, [data-theme="dark"] textarea {
+    background-color: var(--paper-deep);
+    color: var(--ink);
+    border-color: var(--paper-light);
+  }
+`;
+document.head.appendChild(darkModeStyle);
+
 const PeerCtor = (typeof window !== 'undefined' && window.Peer) ? window.Peer : (typeof Peer !== 'undefined' ? Peer : null);
 const stage = document.getElementById('stage');
 
