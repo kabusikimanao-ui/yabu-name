@@ -267,7 +267,7 @@ function renderTitle(stage) {
     </div>
     <div class="center" style="margin-top:16px;">
       <button class="rules-link" id="titleRulesBtn">${t('howToPlay')}</button>
-      ${!isTutorialCompleted() ? ` · <button class="rules-link" id="tutorialBtn">${t('tutorial')}</button>` : ''}
+      · <button class="rules-link" id="tutorialBtn">${t('tutorial')}</button>
       · <button class="rules-link" id="historyBtn">${t('history')}</button>
       · <button class="rules-link" id="statsBtn">${t('stats')}</button>
     </div>
@@ -284,9 +284,7 @@ function renderTitle(stage) {
   document.getElementById('toCreate').onclick = () => { ui.screen = 'create'; render(stage); };
   document.getElementById('toJoin').onclick = () => { ui.screen = 'join'; render(stage); };
   document.getElementById('titleRulesBtn').onclick = () => window.openRulesModal();
-  if (!isTutorialCompleted()) {
-    document.getElementById('tutorialBtn').onclick = () => window.openTutorialModal();
-  }
+  document.getElementById('tutorialBtn').onclick = () => window.openTutorialModal();
   document.getElementById('historyBtn').onclick = () => window.openHistoryModal();
   document.getElementById('statsBtn').onclick = () => window.openStatsModal();
   document.getElementById('themeToggle').onclick = () => {
