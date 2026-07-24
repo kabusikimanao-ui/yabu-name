@@ -42,7 +42,7 @@ export const i18n = {
     reconnect: '部屋番号を入力し直す',
     minimumPlayers: '最低2人集まると開始できます',
     maxPlayers: '最大5人',
-    flip5: '「↓5↑」は特別な数字（flip）です',
+    flip5: '「↓5↑」は特別な数字です',
     previousRoom: '前回の部屋',
     restoreRoom: 'この部屋を復元',
     clear: '削除',
@@ -123,8 +123,8 @@ export const i18n = {
     phase: 'フェーズ',
     players: 'プレイヤー',
     personCount: '人',
-    titleDesc: '竹林に横たわる一体の骸。容疑者は三人。2〜5人で遊ぶ新版',
-    noticeText: 'このバージョンは2〜5人対応。ブラウザ同士がWebRTCで直接通信します。部屋を作った人の端末がゲームの進行を管理します。部屋番号は自分で決められます（3〜6文字）。容疑者カードをタッチして数字を確認します。「↓5↑」は特別な数字（flip）です。',
+    titleDesc: '竹林に横たわる一体の敵。容疑者は三人。2〜5人で遊ぶ新版',
+    noticeText: 'このバージョンは2〜5人対応。ブラウザ同士がWebRTCで直接通信します。部屋を作った人の端末がゲームの進行を管理します。部屋番号は自分で決められます（3〜6文字）。容疑者カードをタッチして数字を確認します。「↓5↑」は特別な数字です。',
     onlineGame: 'オンライン推理ゲーム',
     sealText: '検',
     disconnectedSeal: '切',
@@ -162,6 +162,7 @@ export const i18n = {
     tutorialStep2: 'まず、アリバイ確認フェーズで自分と隣のプレイヤーのタイルを確認します。',
     tutorialStep3: '次に、証言フェーズで容疑者の数字を確認し、犯人を推理します。',
     tutorialStep4: '最後に、全員の証言が出そろったら真相を解明します。',
+    tutorialFinish: 'チュートリアルを終了する', // 追加
     // Issue #13: エモート
     emotes: 'リアクション',
     // Issue #14: PWA
@@ -343,6 +344,7 @@ export const i18n = {
     tutorialStep2: 'First, check your and your neighbor\'s tiles in the Alibi Check phase.',
     tutorialStep3: 'Then, check suspect numbers and deduce the culprit in the Testimony phase.',
     tutorialStep4: 'Finally, reveal the truth when all testimonies are ready.',
+    tutorialFinish: 'Finish Tutorial', // 追加
     emotes: 'Reactions',
     installApp: 'Install App',
     installPrompt: 'Add to home screen to use like an app',
