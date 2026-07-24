@@ -376,19 +376,19 @@ window.openTutorialModal = function() {
         </div>
       `;
     } else if (step === 4) {
-      const isCorrect = guessIdx === 0;
+      const isCorrect = guessIdx === 1; // B(↓5↑)が正解
       content = `
         <div class="modal-box rules-box">
           <h3>${t('tutorialFinish')}</h3>
-          <p style="font-size:15px; line-height:1.8; margin:20px 0;">${isCorrect ? '正解です！' : '残念！'}<br>「↓5↑」が含まれているため、最も小さい数字の <strong style="color:var(--blood);">A（6）</strong> が真犯人でした！</p>
+          <p style="font-size:15px; line-height:1.8; margin:20px 0;">${isCorrect ? '正解です！' : '残念！'}<br>「↓5↑」が含まれているため、最も小さい数字の <strong style="color:var(--blood);">B（↓5↑）</strong> が真犯人でした！</p>
           <div style="display:flex; gap:15px; justify-content:center; margin:20px 0;">
-            <div style="width:60px; height:80px; background:${isCorrect ? '#fff0f0' : 'var(--paper)'}; border:3px solid var(--blood); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; font-size:24px; box-shadow:0 0 12px rgba(140,47,38,.4);">
-              <span style="color:var(--bamboo);">6</span>
-              <span style="font-size:10px; color:var(--blood); margin-top:4px;">真犯人</span>
-            </div>
             <div style="width:60px; height:80px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; font-size:24px; opacity:0.5;">
+              <span style="color:var(--bamboo);">6</span>
+              <span style="font-size:10px; color:var(--ink-soft); margin-top:4px;">A</span>
+            </div>
+            <div style="width:60px; height:80px; background:${isCorrect ? '#fff0f0' : 'var(--paper)'}; border:3px solid var(--blood); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; font-size:24px; box-shadow:0 0 12px rgba(140,47,38,.4);">
               <span style="color:var(--bamboo);">↓5↑</span>
-              <span style="font-size:10px; color:var(--ink-soft); margin-top:4px;">B</span>
+              <span style="font-size:10px; color:var(--blood); margin-top:4px;">真犯人</span>
             </div>
             <div style="width:60px; height:80px; background:var(--paper); border:2px solid var(--paper-deep); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; font-size:24px; opacity:0.5;">
               <span style="color:var(--bamboo);">7</span>
